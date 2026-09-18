@@ -15,7 +15,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cheminformatics import (
-    screen_compound, batch_screen, generate_2d_svg,
+    screen_compound, batch_screen,
     compute_all_descriptors, CompoundMetrics, export_results_csv_rows,
     parse_smiles, generate_3d_conformer, get_mol_block_3d,
 )
@@ -306,10 +306,7 @@ def tab_compound_screening():
 
             with col_a:
                 if result.valid:
-                    mol = parse_smiles(result.smiles)
-                    if mol:
-                        svg = generate_2d_svg(mol, width=300, height=250)
-                        st.image(svg, caption=result.canonical_smiles)
+                    st.markdown(f"**SMILES:** `{result.canonical_smiles}`")
 
                 if result.overall_pass:
                     st.markdown('<div class="verdict-box verdict-viable">PASS -- VIABLE LEAD</div>', unsafe_allow_html=True)
