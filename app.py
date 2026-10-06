@@ -25,7 +25,7 @@ from docking_engine import (
     compute_grid_from_residues, smiles_to_pdbqt, pdb_to_pdbqt,
     run_vina_docking, PHOSPHATASE_TARGETS, get_phosphatase_info,
     list_phosphatase_targets, build_vina_command, get_docking_sources,
-    detect_pocket_grid, compute_grid_whole_protein,
+    detect_pocket_grid, compute_grid_whole_protein, engine_status,
 )
 from research_module import (
     search_pubmed, format_citation_apa, format_citation_bibtex,
@@ -674,18 +674,43 @@ def _ligand_descriptors(smiles: str) -> dict:
     return {}
 
 
-def render_docking_fallback(ligand_smiles: str, isoform_choice: str):
-    """Shown ONLY when the live AutoDock Vina engine is not installed on the
-    server. It never shows anyone's pre-recorded numbers and never fabricates
-    a Vina score. It gives (A) an input-dependent heuristic estimate from the
-    ligand the user typed, clearly labelled as NOT docking, and (B) the exact
-    steps to enable real docking.
+def render_docking_fallback(ligand_smiles: str, isoform_choice: str,
+                            run_error: str = ""):
+    """Shown when a real Vina score could not be produced. Two very different
+    cases, now told apart instead of showing one misleading message:
+      (1) the engine is simply NOT installed on this server, or
+      (2) the engine IS installed but the run itself failed (timeout, OOM,
+          bad grid, unreadable receptor, etc.) — `run_error` is passed.
+    It never shows anyone's pre-recorded numbers and never fabricates a Vina
+    score. It gives (A) an input-dependent heuristic estimate from the ligand
+    the user typed, clearly labelled as NOT docking, and (B) next steps.
     """
-    st.error(
-        "Live docking engine not available on this server. No binding energy "
-        "can be computed here, and this app will NEVER display a stored or "
-        "made-up Vina score in its place. See 'Enable real docking' below."
-    )
+    est_status = engine_status()
+    engine_present = est_status["can_dock"]
+
+    if engine_present and run_error:
+        # Engine exists, but THIS run failed — do not blame packages.txt.
+        st.error(
+            "The AutoDock Vina engine IS installed here, but this particular "
+            "run did not finish, so no Vina score was produced. This is a "
+            "run-time problem (not a missing engine), and the app will NEVER "
+            "show a stored or made-up score in its place."
+        )
+        st.markdown(f"**Error reported by the run:**")
+        st.code(run_error or "(no detail returned)", language="text")
+        st.info(
+            "Common causes on a free CPU/RAM tier: the grid box covers the "
+            "whole protein (blind dock) and times out or runs out of memory, "
+            "the receptor PDB had no usable atoms, or the ligand failed prep. "
+            "Try a smaller grid box around the known pocket, fewer "
+            "exhaustiveness, or a single ligand before retrying."
+        )
+    else:
+        st.error(
+            "Live docking engine not available on this server. No binding energy "
+            "can be computed here, and this app will NEVER display a stored or "
+            "made-up Vina score in its place. See 'Enable real docking' below."
+        )
 
     # ---------- A. Input-dependent heuristic estimate ----------
     st.markdown('<div class="section-header">Quick heuristic estimate for YOUR '
@@ -716,13 +741,14 @@ def render_docking_fallback(ligand_smiles: str, isoform_choice: str):
                 '\u2192 your own Vina score)</div>', unsafe_allow_html=True)
     st.markdown(
         "Real docking runs when the AutoDock Vina engine is present on the "
-        "server. To turn it on for this deployment, add a `packages.txt` file "
-        "to the repo containing:\n"
+        "server. On Streamlit Community Cloud, add a `packages.txt` file to "
+        "the repo containing exactly:\n"
         "```\nautodock-vina\nopenbabel\n```\n"
-        "and keep `meeko` + `vina` in `requirements.txt`. On the next rebuild, "
-        "the full pipeline (upload protein \u2192 set/auto grid \u2192 run \u2192 "
-        "Vina score table \u2192 download) runs on whatever receptor and ligand "
-        "each user enters \u2014 nobody's results are hardcoded."
+        "(do NOT add `fpocket` \u2014 it is not in Debian and breaks the build). "
+        "Keep `rdkit`, `meeko`, `numpy` in `requirements.txt`. On the next "
+        "rebuild, the full pipeline (upload protein \u2192 set/auto grid \u2192 run "
+        "\u2192 Vina score table \u2192 download) runs on whatever receptor and "
+        "ligand each user enters \u2014 nobody's results are hardcoded."
     )
     with st.expander("Exact command this app runs for YOUR inputs"):
         st.code(build_vina_command(), language="bash")
@@ -735,6 +761,42 @@ def render_docking_fallback(ligand_smiles: str, isoform_choice: str):
 
 def tab_docking():
     st.markdown('<div class="section-header">Targeted Molecular Docking</div>', unsafe_allow_html=True)
+
+    # ---- Live engine status: tells the user instantly whether this server
+    #      can run real Vina docking, and exactly what is missing if not. ----
+    est = engine_status()
+    if est["can_dock"]:
+        bits = ["AutoDock Vina" + (" (binary)" if est["vina_binary"] else " (python)")]
+        bits.append("OpenBabel" if est["openbabel"] else "OpenBabel: missing")
+        bits.append("Meeko" if est["meeko"] else "Meeko: missing")
+        st.success(
+            "\u2705 Live docking engine detected on this server \u2014 real "
+            "AutoDock Vina runs on YOUR receptor + ligand. (" + ", ".join(bits) + ")"
+        )
+    else:
+        st.error(
+            "\u274c Live docking engine NOT found on this server, so a real Vina "
+            "score cannot be computed here yet. The culprit is almost always a "
+            "missing or wrong `packages.txt` in the GitHub repo."
+        )
+        with st.expander("Fix it (1 minute, on GitHub) \u2014 what each check means", expanded=True):
+            st.markdown(
+                f"- AutoDock Vina binary: **{'found at ' + est['vina_binary'] if est['vina_binary'] else 'MISSING'}**\n"
+                f"- OpenBabel (`obabel`): **{'found' if est['openbabel'] else 'MISSING'}**\n"
+                f"- Meeko (ligand prep): **{'found' if est['meeko'] else 'MISSING'}**\n"
+            )
+            st.markdown(
+                "On Streamlit Community Cloud, the repo's **`packages.txt`** must "
+                "contain EXACTLY these two lines (nothing else, no `fpocket`):"
+            )
+            st.code("autodock-vina\nopenbabel", language="text")
+            st.markdown(
+                "Edit it directly on GitHub: open `packages.txt` \u2192 pencil icon "
+                "\u2192 replace all text with the two lines above \u2192 Commit to "
+                "`main`. Streamlit rebuilds automatically; both packages exist in "
+                "Debian, so the build goes green and this banner turns to "
+                "\u2705 real docking."
+            )
 
     with st.expander("How docking works here + web alternatives"):
         st.markdown(
@@ -829,9 +891,11 @@ def tab_docking():
             st.caption("Grid auto-calculated from a co-crystallized ligand found "
                        "in the receptor PDB (box centred on that ligand).")
         else:
-            st.caption("Blind docking: fpocket detects the top cavities and the "
-                       "box is centred on the largest predicted pocket. If "
-                       "fpocket is unavailable, a whole-protein box is used.")
+            st.caption("Blind docking: searches the whole protein (box covers the "
+                       "full structure). If a cavity detector (fpocket) is "
+                       "present it centres on the top pocket; otherwise a "
+                       "whole-protein box is used. For fine pocket detection "
+                       "you can also use CB-Dock2 (web).")
 
         st.markdown("**Parameters**")
         pc1, pc2 = st.columns(2)
@@ -906,7 +970,8 @@ def tab_docking():
 
         if not docking_ok:
             # Vina unavailable / produced no result -> honest fallback
-            render_docking_fallback(ligand_smiles, "Auto / Unknown")
+            render_docking_fallback(ligand_smiles, "Auto / Unknown",
+                                    run_error=result.error or "")
             st.markdown("**Grid Configuration**")
             st.json({
                 "center": {"x": final_grid.center_x, "y": final_grid.center_y, "z": final_grid.center_z},

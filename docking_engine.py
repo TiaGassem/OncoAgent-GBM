@@ -772,3 +772,24 @@ def build_vina_command(
 def get_docking_sources() -> dict:
     """Return the validated docking/structure source URLs (credibility layer)."""
     return dict(DOCKING_SOURCES)
+
+
+def engine_status() -> dict:
+    """Report whether the live docking toolchain is present on THIS server.
+
+    Lets the UI tell the user instantly (without running a dock) whether real
+    AutoDock Vina docking is available, and exactly which piece is missing.
+    """
+    vina = shutil.which("vina") or shutil.which("autodock_vina")
+    obabel = shutil.which("obabel") or shutil.which("babel")
+    fpocket = shutil.which("fpocket")
+    # Live docking needs a Vina binary (preferred) or the python binding.
+    can_dock = bool(vina) or HAS_VINA_PYTHON
+    return {
+        "can_dock": can_dock,
+        "vina_binary": vina,                 # path or None
+        "vina_python": HAS_VINA_PYTHON,      # pip `vina` module present?
+        "openbabel": obabel,                 # path or None
+        "meeko": HAS_MEEKO,                  # ligand prep helper
+        "fpocket": fpocket,                  # optional blind-pocket detector
+    }
