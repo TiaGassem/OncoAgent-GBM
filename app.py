@@ -25,6 +25,7 @@ from docking_engine import (
     compute_grid_from_residues, smiles_to_pdbqt, pdb_to_pdbqt,
     run_vina_docking, PHOSPHATASE_TARGETS, get_phosphatase_info,
     list_phosphatase_targets, build_vina_command, get_docking_sources,
+    detect_pocket_grid, compute_grid_whole_protein,
 )
 from research_module import (
     search_pubmed, format_citation_apa, format_citation_bibtex,
@@ -35,8 +36,7 @@ from pdf_chat import (
     build_passage_index, answer_extractive, format_answer_markdown, HAS_PYPDF,
 )
 from docking_fallback import (
-    lookup_stored, heuristic_affinity_estimate, vina_unavailable_message,
-    normalize_target, STORED_RANKING_NOTE, reference_rows, reference_flags,
+    heuristic_affinity_estimate, vina_unavailable_message,
 )
 from anonymizer import (
     MedicalNoteAnonymizer, anonymize_medical_note, detect_pii_in_text,
@@ -154,7 +154,7 @@ Deliver academically validated, clinically reliable insights by integrating mole
 - End every reply with the disclaimer and source links.
 
 # NOTE ON SCOPE (honest)
-Fully wired: docking (vGrid + Vina/SwissDock/CB-Dock2 refs), rule-based toxicity pre-screen (PubChem alerts, NOT ProTox-3), compound screening, cell lines, trial context, PubMed literature.
+Fully wired: docking (per-user AutoDock Vina + fpocket blind docking, SwissDock/CB-Dock2 refs), rule-based toxicity pre-screen (PubChem alerts, NOT ProTox-3), compound screening, cell lines, trial context, PubMed literature.
 Declared but NOT yet implemented as live modules: GEPIA/R2 genomics, UniProt, SwissADME API, EudraCT, ProTox-3 ML. Do not claim their outputs as real until wired.
 """
 
@@ -176,8 +176,8 @@ with st.sidebar:
     for _label, _url in AGENT_SOURCE_LINKS.items():
         st.markdown(f"- [{_label}]({_url})")
     st.markdown("---")
-    st.caption("For Research Use Only - Not medical advice. "
-               "Docking grid (vGrid): center=(48.164, 10.08, 3.111), size=(29.5, 37.1, 26.9).")
+    st.caption("For Research Use Only - Not medical advice. Docking is run "
+               "per-user on AutoDock Vina; no scores or grids are hardcoded.")
 
 st.markdown("""
 <style>
@@ -675,34 +675,30 @@ def _ligand_descriptors(smiles: str) -> dict:
 
 
 def render_docking_fallback(ligand_smiles: str, isoform_choice: str):
-    """Shown when live AutoDock Vina cannot run. Never fabricates a Vina score.
-
-    Two honest, clearly-separated sources:
-      A. A heuristic ESTIMATE computed from THIS ligand's descriptors -- it
-         depends on the SMILES you entered (input-dependent), and is explicitly
-         NOT docking.
-      B. An EDITABLE table of docking numbers YOU recorded from your own runs.
-         The app does not compute these; real scores depend on your receptor,
-         grid, ligand prep and seeds, so you confirm/edit them against your logs.
+    """Shown ONLY when the live AutoDock Vina engine is not installed on the
+    server. It never shows anyone's pre-recorded numbers and never fabricates
+    a Vina score. It gives (A) an input-dependent heuristic estimate from the
+    ligand the user typed, clearly labelled as NOT docking, and (B) the exact
+    steps to enable real docking.
     """
-    st.info(vina_unavailable_message())
-    st.caption(
-        "Note: a binding energy is not a fixed property of a molecule \u2014 it "
-        "depends on the receptor structure, the grid box, ligand preparation and "
-        "the number of seeds. With no Vina binary here, the app cannot recompute "
-        "it from your receptor. So below you get (A) an estimate derived only "
-        "from the ligand you typed, and (B) a table where YOU enter the real "
-        "numbers from your own runs."
+    st.error(
+        "Live docking engine not available on this server. No binding energy "
+        "can be computed here, and this app will NEVER display a stored or "
+        "made-up Vina score in its place. See 'Enable real docking' below."
     )
 
     # ---------- A. Input-dependent heuristic estimate ----------
-    st.markdown('<div class="section-header">A. Heuristic estimate for this ligand '
-                '(NOT a docking result)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Quick heuristic estimate for YOUR '
+                'ligand (NOT a docking result)</div>', unsafe_allow_html=True)
+    st.caption(
+        "This number is computed only from the molecule you typed (its "
+        "descriptors). It is a rough ligand-efficiency heuristic, not AutoDock "
+        "Vina, and it does not use any receptor or grid box."
+    )
     desc = _ligand_descriptors(ligand_smiles)
     if not desc:
-        st.error("Could not compute molecular descriptors for this SMILES "
-                 "(RDKit unavailable or invalid SMILES), so no estimate is "
-                 "produced. No value is fabricated.")
+        st.warning("Could not read this SMILES (RDKit unavailable or invalid "
+                   "SMILES), so no estimate is shown. No value is fabricated.")
     else:
         est = heuristic_affinity_estimate(desc)
         e1, e2, e3 = st.columns(3)
@@ -715,55 +711,43 @@ def render_docking_fallback(ligand_smiles: str, isoform_choice: str):
             st.code(est.rationale, language="text")
             st.json(est.descriptors_used)
 
-    # ---------- B. Your own recorded docking results (editable) ----------
-    st.markdown('<div class="section-header">B. Your recorded docking results '
-                '(you enter / verify \u2014 the app does not compute these)</div>',
-                unsafe_allow_html=True)
-    st.caption(
-        "These numbers come from YOUR own runs and depend on your exact receptor "
-        "/ grid / parameters. The rows below are pre-filled from your thesis "
-        "records as a convenience \u2014 edit any cell to match your actual "
-        ".dlg/.log files, or clear them and type your own. Nothing here is "
-        "generated by this web app."
+    # ---------- B. How to enable REAL docking ----------
+    st.markdown('<div class="section-header">Enable real docking (your input '
+                '\u2192 your own Vina score)</div>', unsafe_allow_html=True)
+    st.markdown(
+        "Real docking runs when the AutoDock Vina engine is present on the "
+        "server. To turn it on for this deployment, add a `packages.txt` file "
+        "to the repo containing:\n"
+        "```\nautodock-vina\nopenbabel\n```\n"
+        "and keep `meeko` + `vina` in `requirements.txt`. On the next rebuild, "
+        "the full pipeline (upload protein \u2192 set/auto grid \u2192 run \u2192 "
+        "Vina score table \u2192 download) runs on whatever receptor and ligand "
+        "each user enters \u2014 nobody's results are hardcoded."
     )
-
-    lig_for_table = "NSC-95397"  # the compound these records belong to
-    key = "user_docking_records"
-    if key not in st.session_state:
-        st.session_state[key] = reference_rows(lig_for_table)
-
-    try:
-        edited = st.data_editor(
-            pd.DataFrame(st.session_state[key]),
-            use_container_width=True, hide_index=True, num_rows="dynamic",
-            key="docking_records_editor",
-            column_config={
-                "Score": st.column_config.NumberColumn(format="%.2f"),
-            },
-        )
-        st.session_state[key] = edited.to_dict("records")
-    except Exception:
-        # older Streamlit without data_editor -> read-only table
-        st.dataframe(pd.DataFrame(st.session_state[key]),
-                     use_container_width=True, hide_index=True)
-
-    for flag in reference_flags(lig_for_table):
-        st.warning(flag)
-    st.caption(STORED_RANKING_NOTE)
-    st.caption("\u26a0\ufe0f kcal/mol (AutoDock4, Vina) and ChemPLP (PLANTS) are "
-               "different scales \u2014 never plot them on one axis.")
-    st.caption("To obtain a real binding energy and 3D pose, run the Vina "
-               "command from the expander above on a machine with AutoDock "
-               "Vina installed.")
+    with st.expander("Exact command this app runs for YOUR inputs"):
+        st.code(build_vina_command(), language="bash")
+        st.caption("The center/size shown are only placeholder defaults; the app "
+                   "substitutes the grid box you set or auto-detect for your "
+                   "own receptor.")
+    st.caption("Web alternatives that run the engine for you: SwissDock "
+               "(swissdock.ch) and CB-Dock2 (cadd.labshare.cn/cb-dock2).")
 
 
 def tab_docking():
     st.markdown('<div class="section-header">Targeted Molecular Docking</div>', unsafe_allow_html=True)
 
-    with st.expander("Reproducible grid (vGrid) + exact Vina command + docking sources"):
+    with st.expander("How docking works here + web alternatives"):
+        st.markdown(
+            "OncoAgent runs **AutoDock Vina** on the server for the receptor "
+            "and ligand YOU provide. Pick a grid-box method on the right "
+            "(blind / co-crystal ligand / residues / manual) \u2014 the box, "
+            "receptor and parameters all change the result, so nothing is "
+            "hardcoded. The command below is the template; the app fills in "
+            "your receptor, ligand and grid."
+        )
         st.code(build_vina_command(), language="bash")
-        st.caption("Validated grid: center=(48.164, 10.08, 3.111), size=(29.5, 37.1, 26.9). "
-                   "Web alternatives: SwissDock (swissdock.ch), CB-Dock2 (cbl-dock2.mohit.bio). "
+        st.caption("Web alternatives that run the engine for you: SwissDock "
+                   "(swissdock.ch), CB-Dock2 (cadd.labshare.cn/cb-dock2). "
                    "Receptors from RCSB PDB (rcsb.org).")
 
     col1, col2 = st.columns([1, 1])
@@ -809,29 +793,45 @@ def tab_docking():
     with col2:
         st.markdown("**Ligand**")
         ligand_smiles = st.text_input("SMILES", value="CN1N=NC2=C(N=CN2C1=O)C(N)=O")
-        st.caption("NOTE: Live docking needs the AutoDock Vina binary (Boost lib). "
-                   "If Vina is unavailable, OncoAgent shows (A) a heuristic "
-                   "estimate from this ligand and (B) an editable table where you "
-                   "enter your own recorded results \u2014 never a fabricated score.")
+        st.caption("Live docking runs AutoDock Vina on the server for YOUR "
+                   "receptor + ligand and extracts the real score. If the Vina "
+                   "engine is not installed, OncoAgent shows a clearly-labelled "
+                   "heuristic estimate + how to enable real docking \u2014 never a "
+                   "stored or fabricated score.")
 
         st.markdown("**Grid Box**")
-        grid_method = st.radio("Definition", ["Auto (co-crystallized ligand)", "Manual coordinates", "Residue-based"])
+        grid_method = st.radio("Definition", [
+            "Blind docking (auto-detect pocket)",
+            "Auto (co-crystallized ligand)",
+            "Manual coordinates",
+            "Residue-based",
+        ])
 
         grid_box = GridBox()
         if grid_method == "Manual coordinates":
+            st.caption("Enter the box that surrounds YOUR target pocket (in \u00c5, "
+                       "receptor coordinates). These fields start at 0 \u2014 no "
+                       "pre-set pocket is assumed.")
             gc1, gc2 = st.columns(2)
             with gc1:
-                grid_box.center_x = st.number_input("Center X", value=48.164, step=0.5)
-                grid_box.center_y = st.number_input("Center Y", value=10.08, step=0.5)
-                grid_box.center_z = st.number_input("Center Z", value=3.111, step=0.5)
+                grid_box.center_x = st.number_input("Center X", value=0.0, step=0.5)
+                grid_box.center_y = st.number_input("Center Y", value=0.0, step=0.5)
+                grid_box.center_z = st.number_input("Center Z", value=0.0, step=0.5)
             with gc2:
-                grid_box.size_x = st.number_input("Size X", value=29.5, step=1.0, min_value=10.0)
-                grid_box.size_y = st.number_input("Size Y", value=37.1, step=1.0, min_value=10.0)
-                grid_box.size_z = st.number_input("Size Z", value=26.9, step=1.0, min_value=10.0)
+                grid_box.size_x = st.number_input("Size X", value=22.0, step=1.0, min_value=10.0)
+                grid_box.size_y = st.number_input("Size Y", value=22.0, step=1.0, min_value=10.0)
+                grid_box.size_z = st.number_input("Size Z", value=22.0, step=1.0, min_value=10.0)
         elif grid_method == "Residue-based":
-            residue_ids = st.text_input("Residue numbers (comma-separated)", value="47,48,120,121,214,215")
+            residue_ids = st.text_input("Catalytic / pocket residue numbers (comma-separated)", value="")
+            st.caption("The box is centred on the residues YOU list (e.g. the "
+                       "catalytic site), so it surrounds exactly your pocket.")
+        elif grid_method == "Auto (co-crystallized ligand)":
+            st.caption("Grid auto-calculated from a co-crystallized ligand found "
+                       "in the receptor PDB (box centred on that ligand).")
         else:
-            st.caption("Grid auto-calculated from co-crystallized ligand in the receptor PDB.")
+            st.caption("Blind docking: fpocket detects the top cavities and the "
+                       "box is centred on the largest predicted pocket. If "
+                       "fpocket is unavailable, a whole-protein box is used.")
 
         st.markdown("**Parameters**")
         pc1, pc2 = st.columns(2)
@@ -869,18 +869,25 @@ def tab_docking():
                 size_x=grid_box.size_x, size_y=grid_box.size_y, size_z=grid_box.size_z,
             )
 
-            if grid_method == "Auto (co-crystallized ligand)":
+            if grid_method == "Blind docking (auto-detect pocket)":
+                final_grid, pocket_msg = detect_pocket_grid(receptor_pdb)
+                st.info(pocket_msg)
+                st.success(f"Grid: center=({final_grid.center_x}, {final_grid.center_y}, {final_grid.center_z}), size=({final_grid.size_x}, {final_grid.size_y}, {final_grid.size_z})")
+            elif grid_method == "Auto (co-crystallized ligand)":
                 ligand_text = extract_ligand_from_pdb(receptor_pdb)
                 if ligand_text:
                     final_grid = compute_grid_from_ligand(ligand_text)
                     st.success(f"Grid: center=({final_grid.center_x}, {final_grid.center_y}, {final_grid.center_z}), size=({final_grid.size_x}, {final_grid.size_y}, {final_grid.size_z})")
                 else:
-                    st.warning("No co-crystallized ligand found. Using default grid.")
+                    st.warning("No co-crystallized ligand found. Switch to Blind docking or Residue-based to define the pocket.")
+                    return
             elif grid_method == "Residue-based":
                 try:
-                    residue_numbers = [int(r.strip()) for r in residue_ids.split(",")]
-                    chain = st.text_input("Chain ID (for grid calc):", value="A")
-                    final_grid = compute_grid_from_residues(receptor_pdb, residue_numbers, chain)
+                    residue_numbers = [int(r.strip()) for r in residue_ids.split(",") if r.strip()]
+                    if not residue_numbers:
+                        st.error("Enter at least one residue number for the pocket.")
+                        return
+                    final_grid = compute_grid_from_residues(receptor_pdb, residue_numbers, "A")
                     st.success(f"Grid: center=({final_grid.center_x}, {final_grid.center_y}, {final_grid.center_z})")
                 except ValueError:
                     st.error("Invalid residue numbers.")
@@ -965,6 +972,25 @@ def tab_docking():
         with de2:
             dock_pdf = generate_pdf_report(evaluate_lead(smiles=ligand_smiles, compound_metrics={}, docking_energy=result.binding_affinity, compound_name="Docking_Ligand"))
             st.download_button(T["export_pdf"], data=dock_pdf, file_name=f"docking_{datetime.now().strftime('%Y%m%d')}.pdf", mime="application/pdf", use_container_width=True)
+
+        de3, de4 = st.columns(2)
+        with de3:
+            if result.poses:
+                st.download_button(
+                    "Download all poses (CSV)",
+                    data=pd.DataFrame(result.poses).to_csv(index=False),
+                    file_name=f"docking_poses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv", use_container_width=True)
+        with de4:
+            if result.ligand_pdbqt:
+                st.download_button(
+                    "Download docked poses (PDBQT)",
+                    data=result.ligand_pdbqt,
+                    file_name=f"docked_ligand_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdbqt",
+                    mime="chemical/x-pdbqt", use_container_width=True)
+        st.caption("Tip: email isn't sent from the browser \u2014 download these "
+                   "files (scores CSV, poses PDBQT, PDF) and attach them "
+                   "yourself, or open the PDBQT in PyMOL/ChimeraX for figures.")
 
 
 # ============================================================
@@ -1946,12 +1972,66 @@ def _chat_sources_footer() -> str:
 _TOPIC_SOURCES = {
     "docking": ["Docking (AutoDock Vina)", "Docking (SwissDock)",
                 "Docking (CB-Dock2)", "Receptor Structures (RCSB PDB)"],
+    "gbm": ["Literature (PubMed)", "Clinical Trials (ClinicalTrials.gov)"],
     "cell_line": ["Cell Lines (Cellosaurus)", "Cell Lines (NCI DTP)"],
     "toxicity": ["Toxicity / Structural Alerts (PubChem)"],
     "targets": ["Receptor Structures (RCSB PDB)", "Literature (PubMed)"],
     "trials": ["Clinical Trials (ClinicalTrials.gov)"],
     "literature": ["Literature (PubMed)"],
 }
+
+
+def _pubmed_live_answer(question: str, max_results: int = 5) -> dict:
+    """Search PubMed LIVE for any question and build a short, source-cited,
+    non-fabricated answer. Returns {summary, references, pmids, ok}.
+
+    The summary is extracted/condensed from the single most relevant real
+    abstract (quoted with its PMID). It never invents facts: if PubMed returns
+    nothing or is unreachable, it says so.
+    """
+    out = {"summary": "", "references": [], "pmids": [], "ok": False}
+    # Bias the query toward this app's domain so answers stay on-topic.
+    q = (question or "").strip()
+    if not q:
+        return out
+    domain = q
+    low = q.lower()
+    if not any(k in low for k in ["glioblastoma", "gbm", "glioma", "cdc25",
+                                  "temozolomide", "tmz"]):
+        domain = f"{q} AND (glioblastoma OR glioma)"
+    try:
+        articles = search_pubmed(domain, max_results=max_results)
+    except Exception:
+        articles = []
+    if not articles:
+        return out
+    out["ok"] = True
+    out["pmids"] = [a.pmid for a in articles if a.pmid]
+    out["references"] = [format_citation_apa(a) for a in articles]
+    top = articles[0]
+    snippet = (top.abstract or "").strip()
+    if snippet:
+        # keep it short: first ~2 sentences of the real abstract
+        import re as _re
+        sents = _re.split(r"(?<=[.!?])\s+", snippet)
+        snippet = " ".join(sents[:2]).strip()
+        if len(snippet) > 600:
+            snippet = snippet[:600].rstrip() + "\u2026"
+    pmid_tag = f" (PMID {top.pmid})" if top.pmid else ""
+    if snippet:
+        out["summary"] = (
+            f"From the current PubMed literature, the most relevant primary "
+            f"source is **{top.title}**{pmid_tag}. Key point from its abstract: "
+            f"\u201c{snippet}\u201d See the References below for the full list; "
+            f"always read the papers themselves before citing."
+        )
+    else:
+        out["summary"] = (
+            f"The most relevant indexed source is **{top.title}**{pmid_tag} "
+            f"(no abstract available in PubMed). See References below and read "
+            f"the source before citing."
+        )
+    return out
 
 
 def _chat_answer_struct(question: str) -> dict:
@@ -1975,15 +2055,16 @@ def _chat_answer_struct(question: str) -> dict:
 
     if any(k in q for k in ["dock", "grid", "vina", "affinity", "pose",
                             "binding", "swissdock", "cb-dock", "cbl-dock"]):
-        g = GridBox()
         parts.append(
-            "**Molecular docking \u2014 reproducible setup.**  \n"
-            f"Grid (vGrid): center = ({g.center_x}, {g.center_y}, {g.center_z}), "
-            f"size = ({g.size_x}, {g.size_y}, {g.size_z}).\n\n"
-            "```bash\n" + build_vina_command() + "\n```\n"
-            "Engines: AutoDock Vina (local), SwissDock / CB-Dock2 (web); "
-            "receptors from RCSB PDB. Docking scores are computational "
-            "rankings \u2014 not experimental affinities or selectivity."
+            "**Molecular docking \u2014 how OncoAgent runs it.**  \n"
+            "You load YOUR receptor (RCSB PDB ID or upload), enter a ligand "
+            "SMILES, then define the grid box by: blind docking (fpocket "
+            "auto-detects the cavity), a co-crystallized ligand, specific "
+            "catalytic residues, or manual coordinates. The app runs AutoDock "
+            "Vina on the server and returns the binding energy and poses for "
+            "YOUR exact inputs \u2014 no scores are hardcoded. The grid box, "
+            "receptor and parameters all change the result. Docking scores are "
+            "computational rankings, not experimental affinities or selectivity."
         )
         topics.append("docking")
 
@@ -2025,34 +2106,56 @@ def _chat_answer_struct(question: str) -> dict:
         topics.append("trials")
 
     lit_found = False
-    if any(k in q for k in ["paper", "literature", "citation", "reference",
-                            "pubmed", "study", "evidence"]):
-        try:
-            if "paper_index" not in st.session_state:
-                st.session_state["paper_index"] = build_paper_index()
-            hits = query_paper_index(st.session_state["paper_index"], question, top_k=5)
-            if hits:
-                lit_found = True
-                out["references"] = [h["apa"] for h in hits if h.get("apa")]
-                parts.append("**Literature.** Relevant primary papers retrieved "
-                             "from PubMed (see References).")
-            else:
-                parts.append("**Literature.** No validated evidence found in PubMed "
-                             "for this query.")
-            topics.append("literature")
-        except Exception:
-            parts.append("**Literature.** PubMed index unavailable offline \u2014 "
-                         "no validated evidence retrieved.")
+    # General GBM / oncology biology question -> ground it in LIVE PubMed.
+    _gbm_terms = ["gbm", "glioblastoma", "glioma", "tmz", "temozolomide",
+                  "mgmt", "egfr", "idh", "resistance", "recurrence", "prognosis",
+                  "survival", "radiotherapy", "chemotherapy", "apoptosis",
+                  "proliferation", "migration", "invasion", "mechanism",
+                  "pathway", "biomarker", "nsc95397", "nsc-95397", "spheroid"]
+    _already_lit = any(k in q for k in ["paper", "literature", "citation",
+                                        "reference", "pubmed", "study", "evidence"])
+    if (not _already_lit) and any(k in q for k in _gbm_terms):
+        live = _pubmed_live_answer(question, max_results=5)
+        if live["ok"]:
+            lit_found = True
+            out["references"] = live["references"]
+            parts.append(live["summary"])
             topics.append("literature")
 
+    if any(k in q for k in ["paper", "literature", "citation", "reference",
+                            "pubmed", "study", "evidence"]):
+        live = _pubmed_live_answer(question, max_results=5)
+        if live["ok"]:
+            lit_found = True
+            out["references"] = live["references"]
+            parts.append(live["summary"])
+        else:
+            parts.append("**Literature.** PubMed returned no results or is "
+                         "unreachable here \u2014 no validated evidence retrieved.")
+        topics.append("literature")
+
     if not parts:
+        # No curated topic matched -> answer ANY question from LIVE PubMed,
+        # with real titles + PMIDs. Never the old canned menu, never fabricated.
+        live = _pubmed_live_answer(question, max_results=5)
+        if live["ok"]:
+            out["matched"] = True
+            out["answer"] = live["summary"]
+            out["references"] = live["references"]
+            out["sources"] = [("Literature (PubMed)",
+                               AGENT_SOURCE_LINKS.get("Literature (PubMed)",
+                                                      "https://pubmed.ncbi.nlm.nih.gov/"))]
+            out["score"] = 60
+            out["note"] = "Answer grounded in live PubMed results."
+            return out
         out["answer"] = (
-            "I can answer, with sources, on: **docking setup**, **GBM cell "
-            "lines**, **toxicity pre-screening**, **phosphatase targets**, "
-            "**clinical-trial context**, and **PubMed literature**. Try one of "
-            "the topic buttons above. I cannot give clinical recommendations."
+            "I searched PubMed for your question but got no usable result here "
+            "(it may be offline, or the query was too narrow). Try rephrasing "
+            "with a clear GBM term (e.g. 'TMZ resistance mechanisms', 'CDC25B "
+            "inhibitors glioma'), or ask about docking, cell lines, toxicity, "
+            "targets, or trials. I never make up answers or citations."
         )
-        out["score"] = 25
+        out["score"] = 20
         out["matched"] = False
         return out
 

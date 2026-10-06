@@ -41,26 +41,28 @@ DOCKING_SOURCES = {
     "PubChem (ligand / structural alerts)": "https://pubchem.ncbi.nlm.nih.gov/",
 }
 
-# EXACT validated grid for the OncoAgent-GBM target pocket (vGrid).
-# These values are the project's calibrated binding-site box and are used
-# as the module-wide default so every run is reproducible.
-VGRID_CENTER = (48.164, 10.08, 3.111)
-VGRID_SIZE = (29.5, 37.1, 26.9)
+# Neutral default grid box. There is NO hardcoded "project pocket": every
+# run derives its box from the user's receptor (blind/fpocket, co-crystal
+# ligand, residues, or manual entry). These defaults are only placeholders
+# for the command-line template.
+VGRID_CENTER = (0.0, 0.0, 0.0)
+VGRID_SIZE = (22.5, 22.5, 22.5)
 
 
 @dataclass
 class GridBox:
     """Docking grid box definition.
 
-    Defaults are the EXACT validated OncoAgent-GBM pocket (vGrid):
-    center=(48.164, 10.08, 3.111), size=(29.5, 37.1, 26.9).
+    Defaults are NEUTRAL placeholders (center 0,0,0 / size 22.5 \u00c5). The app
+    always computes the real box from the user's own receptor; nothing here is
+    a pre-set project pocket.
     """
-    center_x: float = 48.164
-    center_y: float = 10.08
-    center_z: float = 3.111
-    size_x: float = 29.5
-    size_y: float = 37.1
-    size_z: float = 26.9
+    center_x: float = 0.0
+    center_y: float = 0.0
+    center_z: float = 0.0
+    size_x: float = 22.5
+    size_y: float = 22.5
+    size_z: float = 22.5
 
 
 @dataclass
@@ -234,6 +236,94 @@ def compute_grid_from_residues(
     )
 
 
+def compute_grid_whole_protein(pdb_path: str, padding: float = 5.0) -> GridBox:
+    """Blind-docking box covering the whole protein (fallback when no pocket
+    detector is available). Centre = protein centroid, size = bounding box."""
+    coords = []
+    with open(pdb_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("ATOM"):
+                try:
+                    coords.append([float(line[30:38]), float(line[38:46]),
+                                   float(line[46:54])])
+                except (ValueError, IndexError):
+                    continue
+    if not coords:
+        return GridBox()
+    coords = np.array(coords)
+    center = coords.mean(axis=0)
+    span = coords.max(axis=0) - coords.min(axis=0)
+    return GridBox(
+        center_x=round(float(center[0]), 3),
+        center_y=round(float(center[1]), 3),
+        center_z=round(float(center[2]), 3),
+        size_x=round(float(span[0]) + 2 * padding, 1),
+        size_y=round(float(span[1]) + 2 * padding, 1),
+        size_z=round(float(span[2]) + 2 * padding, 1),
+    )
+
+
+def detect_pocket_grid(pdb_path: str, padding: float = 6.0) -> tuple:
+    """CB-Dock2-style blind docking: detect the largest cavity with fpocket
+    and build a grid box centred on it. Returns (GridBox, info_message).
+
+    Falls back to a whole-protein box if fpocket is not installed or finds
+    no pocket. Never fabricates a pocket.
+    """
+    fpocket = shutil.which("fpocket")
+    if fpocket is None:
+        return (compute_grid_whole_protein(pdb_path),
+                "fpocket not installed - using a whole-protein (blind) box.")
+    try:
+        workdir = tempfile.mkdtemp()
+        local_pdb = os.path.join(workdir, "receptor.pdb")
+        shutil.copy(pdb_path, local_pdb)
+        proc = subprocess.run([fpocket, "-f", local_pdb],
+                              capture_output=True, text=True, timeout=180)
+        if proc.returncode != 0:
+            return (compute_grid_whole_protein(pdb_path),
+                    "fpocket failed - using a whole-protein (blind) box.")
+        # fpocket writes <stem>_out/<stem>_out.pdb with pocket atoms as HETATM STP
+        stem = os.path.splitext(os.path.basename(local_pdb))[0]
+        out_pdb = os.path.join(workdir, f"{stem}_out", f"{stem}_out.pdb")
+        if not os.path.exists(out_pdb):
+            return (compute_grid_whole_protein(pdb_path),
+                    "fpocket produced no pocket - using a whole-protein box.")
+        # pocket 1 = highest-ranked; collect its STP centre atoms
+        p1 = []
+        with open(out_pdb, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("HETATM") and line[17:20].strip() == "STP":
+                    try:
+                        pnum = int(line[22:26].strip())
+                    except ValueError:
+                        continue
+                    if pnum == 1:
+                        try:
+                            p1.append([float(line[30:38]), float(line[38:46]),
+                                       float(line[46:54])])
+                        except (ValueError, IndexError):
+                            continue
+        if not p1:
+            return (compute_grid_whole_protein(pdb_path),
+                    "fpocket found no ranked pocket - using a whole-protein box.")
+        p1 = np.array(p1)
+        center = p1.mean(axis=0)
+        span = p1.max(axis=0) - p1.min(axis=0)
+        box = GridBox(
+            center_x=round(float(center[0]), 3),
+            center_y=round(float(center[1]), 3),
+            center_z=round(float(center[2]), 3),
+            size_x=round(max(float(span[0]) + 2 * padding, 16.0), 1),
+            size_y=round(max(float(span[1]) + 2 * padding, 16.0), 1),
+            size_z=round(max(float(span[2]) + 2 * padding, 16.0), 1),
+        )
+        return (box, "fpocket detected the top-ranked cavity (pocket 1).")
+    except Exception as e:
+        return (compute_grid_whole_protein(pdb_path),
+                f"Pocket detection error ({e}); using a whole-protein box.")
+
+
 def smiles_to_pdbqt(smiles: str, output_path: str) -> str:
     """Convert SMILES to a PDBQT file for Vina docking."""
     mol = Chem.MolFromSmiles(smiles)
@@ -298,7 +388,25 @@ def smiles_to_pdbqt(smiles: str, output_path: str) -> str:
 
 
 def pdb_to_pdbqt(pdb_path: str, output_path: str, is_receptor: bool = True) -> str:
-    """Convert a PDB file to PDBQT format for Vina docking."""
+    """Convert a PDB file to PDBQT format for Vina docking.
+
+    Prefers OpenBabel (`obabel`, credible atom typing + charges); falls back to
+    a lightweight heuristic typing only if OpenBabel is unavailable.
+    """
+    obabel = shutil.which("obabel") or shutil.which("babel")
+    if obabel is not None:
+        try:
+            cmd = [obabel, pdb_path, "-O", output_path]
+            if is_receptor:
+                # -xr: rigid receptor (no rotatable bonds), partial charges added
+                cmd += ["-xr"]
+            cmd += ["--partialcharge", "gasteiger"]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if proc.returncode == 0 and os.path.exists(output_path) \
+                    and os.path.getsize(output_path) > 0:
+                return output_path
+        except Exception:
+            pass  # fall through to heuristic
     return _convert_pdb_to_pdbqt(pdb_path, output_path, is_ligand=not is_receptor)
 
 
