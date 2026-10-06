@@ -31,6 +31,9 @@ from research_module import (
     get_gbm_queries, get_gbm_reference_guide, format_multiple_citations,
     get_crossref_doi, get_related_papers, build_paper_index, query_paper_index,
 )
+from pdf_chat import (
+    build_passage_index, answer_extractive, format_answer_markdown, HAS_PYPDF,
+)
 from anonymizer import (
     MedicalNoteAnonymizer, anonymize_medical_note, detect_pii_in_text,
     generate_sample_medical_note, GBM_MEDICAL_NOTE_TEMPLATE,
@@ -161,7 +164,8 @@ with st.sidebar:
         "- Cell Line Database\n"
         "- Clinical Trial Matching\n"
         "- Treatment Planning (research-only)\n"
-        "- AI Chat Assistant (source-cited)"
+        "- AI Chat Assistant (source-cited)\n"
+        "- Chat with PDF / Library (extractive, verbatim + page numbers)"
     )
     st.markdown("---")
     st.markdown("**Validated Sources**")
@@ -297,6 +301,50 @@ hr {
     border: none;
     border-top: 1px solid var(--border);
     margin: 1.5rem 0;
+}
+
+/* ---- SciSpace-style extractive chat ---- */
+.hero-title {
+    font-size: 1.9rem;
+    font-weight: 700;
+    color: var(--text);
+    text-align: center;
+    margin: 0.5rem 0 0.25rem 0;
+    letter-spacing: -0.02em;
+}
+.hero-sub {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+}
+.quote-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.9rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.quote-card .q-text {
+    font-size: 0.98rem;
+    color: var(--text);
+    line-height: 1.55;
+}
+.quote-card .q-cite {
+    margin-top: 0.6rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+.cred-badge {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1953,15 +2001,134 @@ def render_sidebar_chat():
             st.session_state["sidebar_chat"].append(("assistant", answer))
             st.rerun()
 
+def tab_pdf_chat():
+    """Extractive 'Chat with your PDF / library' -- quotes real sentences + page numbers.
+
+    Unlike SciSpace/Anara generative chat, this returns ONLY verbatim sentences
+    from the uploaded papers, each tagged with filename + page. Nothing is
+    written by the model, so there is nothing to hallucinate -- every line is a
+    direct quote the jury can check on the cited page.
+    """
+    st.markdown('<div class="hero-title">Chat with your papers</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="hero-sub">Ask a question &mdash; get the exact sentences '
+        'from your PDFs, with page numbers. No AI-written text, so nothing to '
+        'hallucinate. Every answer is verifiable.</div>',
+        unsafe_allow_html=True)
+
+    if not HAS_PYPDF:
+        st.error("pypdf is not installed. Add `pypdf>=4.0` to requirements.txt and redeploy.")
+        return
+
+    center = st.columns([1, 6, 1])[1]
+    with center:
+        files = st.file_uploader(
+            "Drop your GBM / CDC25 PDFs here",
+            type=["pdf"], accept_multiple_files=True, key="pdfchat_files",
+            label_visibility="visible",
+        )
+
+        if files:
+            docs = []
+            for f in files:
+                try:
+                    docs.append((f.name, f.getvalue()))
+                except Exception:
+                    pass
+            sig = tuple(sorted(d[0] for d in docs))
+            if st.session_state.get("pdfchat_sig") != sig:
+                with st.spinner("Reading pages and indexing sentences..."):
+                    index = build_passage_index(docs, passages_per_page_mode="sentence")
+                st.session_state["pdfchat_index"] = index
+                st.session_state["pdfchat_sig"] = sig
+            st.success(
+                f"\u2713 {len(st.session_state.get('pdfchat_index', []))} "
+                f"sentences indexed from {len(docs)} paper(s). Ask away."
+            )
+
+        index = st.session_state.get("pdfchat_index", [])
+
+        examples = [
+            "Is CDC25 overexpressed in glioblastoma?",
+            "Mechanism of action of NSC-95397?",
+            "Which cell lines were used?",
+            "What IC50 / Ki was reported?",
+            "Does it cause cell cycle arrest?",
+        ]
+        chip_cols = st.columns(len(examples))
+        for i, ex in enumerate(examples):
+            if chip_cols[i].button(ex, key=f"pdfchat_ex_{i}", use_container_width=True):
+                st.session_state["pdfchat_q"] = ex
+
+        question = st.text_input(
+            "Your question",
+            value=st.session_state.get("pdfchat_q", ""),
+            placeholder="e.g. How does NSC-95397 inhibit CDC25B?",
+            key="pdfchat_q_input",
+            label_visibility="collapsed",
+        )
+        c1, c2 = st.columns([3, 1])
+        go = c1.button("Search my papers", type="primary",
+                       use_container_width=True, key="pdfchat_go")
+        top_k = c2.selectbox("Quotes", [3, 5, 8, 10], index=1,
+                             key="pdfchat_topk", label_visibility="collapsed")
+
+        if go:
+            if not index:
+                st.warning("Upload at least one PDF first.")
+            elif not question.strip():
+                st.warning("Type a question.")
+            else:
+                ans = answer_extractive(index, question, top_k=int(top_k))
+                # credibility badge colour
+                col = ("#16a34a" if ans.confidence >= 60 else
+                       "#d97706" if ans.confidence >= 30 else "#dc2626")
+                bg = ("#dcfce7" if ans.confidence >= 60 else
+                      "#fef3c7" if ans.confidence >= 30 else "#fee2e2")
+                st.markdown(
+                    f'<span class="cred-badge" style="background:{bg};color:{col}">'
+                    f'Credibility {ans.confidence}/100 \u00b7 extractive</span>',
+                    unsafe_allow_html=True)
+                st.write("")
+                if not ans.quotes:
+                    st.info(ans.note or "No validated passage found for this query "
+                            "in the uploaded document(s). This is the honest result "
+                            "\u2014 the engine will not invent an answer.")
+                else:
+                    for q in ans.quotes:
+                        safe = (q["quote"].replace("&", "&amp;")
+                                .replace("<", "&lt;").replace(">", "&gt;"))
+                        st.markdown(
+                            f'<div class="quote-card">'
+                            f'<div class="q-text">\u201c{safe}\u201d</div>'
+                            f'<div class="q-cite">\u2014 {q["source"]}, '
+                            f'p.{q["page"]} &nbsp;\u00b7&nbsp; '
+                            f'{q["terms_matched"]} term(s) matched</div>'
+                            f'</div>', unsafe_allow_html=True)
+                    st.download_button(
+                        "Download these quotes (Markdown)",
+                        data=format_answer_markdown(ans),
+                        file_name="extractive_answer.md",
+                        mime="text/markdown", key="pdfchat_dl",
+                    )
+                st.caption(
+                    "\u26a0\ufe0f Every line above is a direct quote from your PDF. "
+                    "Re-read the cited page in context before using it in your thesis."
+                )
+
 
 def main():
     render_header()
     render_sidebar_chat()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        T["tab1"], T["tab2"], T["tab3"], T["tab4"], "AI Chat Assistant",
+    tab_pdfchat, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Chat with Papers", T["tab1"], T["tab2"], T["tab3"], T["tab4"],
+        "AI Chat Assistant",
     ])
 
+    with tab_pdfchat:
+        tab_pdf_chat()
     with tab1:
         tab_compound_screening()
     with tab2:
