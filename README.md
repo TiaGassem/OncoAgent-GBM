@@ -27,11 +27,12 @@ OncoAgent-GBM is a local, privacy-first Python platform designed for Glioblastom
 - Blood-Brain Barrier (BBB) permeability scoring
 - Lipinski Rule of 5 and Veber rules compliance
 - 52-compound GBM drug library including NSC-95397 and related naphthoquinones
-- **ProTox-3 toxicity panel** (Ames, hERG, hepatotoxicity, LD50, carcinogenicity)
+- **Rule-based toxicity pre-screen** using structural alerts (PubChem patterns) + LogP/MW thresholds (Ames, hERG, hepatotoxicity, LD50, carcinogenicity). This is a transparent heuristic, **NOT ProTox-3** and not a machine-learning predictor.
 
 ### 2. Molecular Docking
 - PDB receptor fetching from RCSB
-- AutoDock Vina docking engine (when available)
+- AutoDock Vina docking engine (when available), plus SwissDock and CB-Dock2 as web alternatives
+- Validated reproducible grid (vGrid): center=(48.164, 10.08, 3.111), size=(29.5, 37.1, 26.9)
 - 3D visualization with py3Dmol
 - Phosphatase target database (Cdc25A/B/C, MKP-1, SHP-1/2, PTEN, PTP1B)
 
@@ -52,7 +53,12 @@ OncoAgent-GBM is a local, privacy-first Python platform designed for Glioblastom
 - APA and BibTeX citation generation
 - GBM reference guide
 
-### 6. Export
+### 6. AI Chat Assistant (source-cited)
+- Context-aware GBM research Q&A with topic chips: Docking | Cell Line | Toxicity | Targets | Trials | Sources
+- Literature answers backed by a real PubMed-built paper index
+- No diagnosis and no clinical predictions; every reply ends with a disclaimer and validated source links
+
+### 7. Export
 - PDF audit reports (FPDF2)
 - Word/DOCX reports (python-docx)
 - CSV data export
@@ -65,7 +71,7 @@ OncoAgent-GBM is a local, privacy-first Python platform designed for Glioblastom
 | Frontend | Streamlit |
 | Cheminformatics | RDKit |
 | Docking | AutoDock Vina |
-| Toxicity | ProTox-3 inspired (rule-based) |
+| Toxicity | Rule-based structural alerts (PubChem patterns) - NOT ProTox-3 |
 | PDF | FPDF2 |
 | Word | python-docx |
 | PII | Presidio |
@@ -109,9 +115,20 @@ OncoAgent-GBM/
   LICENSE                 # MIT License
 ```
 
+## Validated Sources (credibility layer)
+
+Every result is traceable to a real public source:
+
+- Clinical trials: https://clinicaltrials.gov/
+- Cell lines: https://cellosaurus.org/ and https://dtp.cancer.gov/
+- Toxicity / structural alerts: https://pubchem.ncbi.nlm.nih.gov/
+- Docking: https://swissdock.ch/ , https://cbl-dock2.mohit.bio/ , https://autodock.scripps.edu/
+- Receptor structures: https://www.rcsb.org/
+- Literature: https://pubmed.ncbi.nlm.nih.gov/
+
 ## Disclaimer
 
-This platform is for **research purposes only**. All computational predictions must be validated experimentally. This does not constitute medical advice or clinical decision-making guidance.
+This platform is for **research purposes only**. **Not medical advice.** All computational predictions must be validated experimentally. This does not constitute medical advice or clinical decision-making guidance.
 
 ## License
 
