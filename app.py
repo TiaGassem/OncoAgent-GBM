@@ -123,15 +123,32 @@ NOT_MEDICAL_ADVICE = (
     "against the cited primary sources."
 )
 
-AGENT_MASTER_PROMPT = """You are OncoAgent-GBM, a clinically credible, academically rigorous research assistant for glioblastoma (GBM) drug discovery.
-Mission: integrate molecular docking, ADME/toxicity pre-screening, cell-line biology, and clinical-trial context into reproducible, transparent, source-cited workflows.
-Rules you must never break:
-- Ground every answer in the real sources listed in the app (ClinicalTrials.gov, Cellosaurus, NCI DTP, PubChem, SwissDock, CB-Dock2, AutoDock, RCSB PDB, PubMed).
-- Never provide clinical predictions, diagnosis, or treatment advice.
-- If no validated evidence is found, say exactly: \"No validated evidence found.\"
-- Use APA citations with URLs; keep computational observations separate from biological interpretation.
-- Toxicity here is a rule-based structural-alert pre-screen (PubChem), NOT ProTox-3.
-- End every reply with the disclaimer and the source links.
+AGENT_MASTER_PROMPT = """# ROLE
+You are OncoAgent-GBM - a clinically credible, academically rigorous AI agent specialized in glioblastoma (GBM) research, drug discovery, and translational oncology.
+
+# MISSION
+Deliver academically validated, clinically reliable insights by integrating molecular docking, ADME/Tox prediction, genomics/transcriptomics, clinical-trial mapping, patient-safety insights, literature synthesis, and simulation workflows.
+
+# CORE PRINCIPLES
+1. Academic Integrity: base all outputs on peer-reviewed literature and public databases (PubMed, ClinicalTrials.gov, UniProt, PubChem, SwissADME, GEPIA, R2 Genomics).
+2. Clinical Reliability: follow biomedical ethics; never provide medical advice - research insights only.
+3. Transparency: cite sources; if evidence is missing, state "No validated data available."
+4. Reproducibility: all workflows (docking, ADME, toxicity, genomics) are documented and reproducible.
+5. Explainability: include reasoning, validation metrics, and biological interpretation.
+
+# OUTPUT STANDARDS
+- Structured replies: Abstract -> Methods -> Results -> Discussion -> References (APA/Harvard).
+- Include a credibility score (0-100) based on source reliability.
+- When uncertain: "Evidence insufficient for a validated conclusion."
+
+# GUARDRAILS
+- No hallucinations, no speculative claims, no unverified clinical recommendations.
+- Always clarify data origin and confidence level.
+- End every reply with the disclaimer and source links.
+
+# NOTE ON SCOPE (honest)
+Fully wired: docking (vGrid + Vina/SwissDock/CB-Dock2 refs), rule-based toxicity pre-screen (PubChem alerts, NOT ProTox-3), compound screening, cell lines, trial context, PubMed literature.
+Declared but NOT yet implemented as live modules: GEPIA/R2 genomics, UniProt, SwissADME API, EudraCT, ProTox-3 ML. Do not claim their outputs as real until wired.
 """
 
 with st.sidebar:
@@ -140,9 +157,11 @@ with st.sidebar:
     st.markdown(
         "- Compound Screening\n"
         "- Molecular Docking\n"
-        "- Literature & Bibliography\n"
-        "- Patient Data & Trial Matching\n"
-        "- AI Chat Assistant"
+        "- Literature Research\n"
+        "- Cell Line Database\n"
+        "- Clinical Trial Matching\n"
+        "- Treatment Planning (research-only)\n"
+        "- AI Chat Assistant (source-cited)"
     )
     st.markdown("---")
     st.markdown("**Validated Sources**")
@@ -1819,14 +1838,18 @@ def _chat_answer(question: str) -> str:
         )
 
     # --- Literature intent (real PubMed-backed retrieval) ---
+    references: list[str] = []
+    lit_found = False
     if any(k in q for k in ["paper", "literature", "citation", "reference", "pubmed", "study", "evidence"]):
         try:
             if "paper_index" not in st.session_state:
                 st.session_state["paper_index"] = build_paper_index()
             hits = query_paper_index(st.session_state["paper_index"], question, top_k=5)
             if hits:
-                cites = "\n".join(f"- {h['apa']}" for h in hits if h.get("apa"))
-                parts.append("**Relevant literature (PubMed):**\n" + cites)
+                lit_found = True
+                references = [h["apa"] for h in hits if h.get("apa")]
+                parts.append("Relevant primary literature was retrieved from PubMed "
+                             "(see References).")
             else:
                 parts.append("No validated evidence found.")
         except Exception:
@@ -1838,10 +1861,31 @@ def _chat_answer(question: str) -> str:
             "I can help with docking setup, GBM cell lines, toxicity pre-screening, "
             "phosphatase targets, clinical-trial context, and PubMed literature - "
             "always with sources. If you were asking for a clinical recommendation, "
-            "I cannot provide one. No validated evidence found for that request."
+            "I cannot provide one. Evidence insufficient for a validated conclusion."
         )
 
-    return "\n\n".join(parts) + _chat_sources_footer()
+    # --- Credibility score (0-100): grounded parts + live literature ---
+    grounded = len(parts)
+    score = min(100, 40 + 15 * grounded + (20 if lit_found else 0))
+    if "no validated evidence found" in " ".join(parts).lower() and not lit_found:
+        score = min(score, 35)
+
+    # --- Structured output: Abstract -> Methods -> Results -> Discussion -> References ---
+    results_body = "\n\n".join(parts)
+    ref_body = ("\n".join(f"- {r}" for r in references)
+                if references else "- See validated source links below.")
+    structured = (
+        f"**Abstract.** Research-only response to: _{question.strip()}_\n\n"
+        f"**Methods.** Grounded in the app's validated modules and public "
+        f"databases (PubMed, ClinicalTrials.gov, PubChem, Cellosaurus, RCSB PDB, "
+        f"AutoDock/SwissDock/CB-Dock2). Toxicity is a rule-based pre-screen, not ProTox-3.\n\n"
+        f"**Results.**\n{results_body}\n\n"
+        f"**Discussion.** Computational observations are rankings/flags, not "
+        f"experimental proof or clinical outcomes; verify against the cited sources.\n\n"
+        f"**References.**\n{ref_body}\n\n"
+        f"**Credibility score:** {score}/100"
+    )
+    return structured + _chat_sources_footer()
 
 
 def tab_chat_assistant():
