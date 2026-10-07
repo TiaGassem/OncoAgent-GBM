@@ -35,8 +35,8 @@ except ImportError:
 # ------------------------------------------------------------------
 DOCKING_SOURCES = {
     "AutoDock Vina / AutoDock": "https://autodock.scripps.edu/",
-    "SwissDock": "https://swissdock.ch/",
-    "CB-Dock2 (CBL-Dock2)": "https://cbl-dock2.mohit.bio/",
+    "SwissDock": "https://www.swissdock.ch/",
+    "CB-Dock2": "https://cadd.labshare.cn/cb-dock2/",
     "RCSB PDB (receptor source)": "https://www.rcsb.org/",
     "PubChem (ligand / structural alerts)": "https://pubchem.ncbi.nlm.nih.gov/",
 }
