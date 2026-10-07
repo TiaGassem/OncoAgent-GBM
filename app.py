@@ -52,6 +52,9 @@ try:
 except ImportError:
     compare_with_protox = None
 
+from kinetics import fit_4pl, parse_pairs, FitResult, HAS_SCIPY
+from admet import compute_admet, boiled_egg_png, AdmetResult, HAS_RDKIT as ADMET_HAS_RDKIT
+
 st.set_page_config(
     page_title="OncoAgent-GBM",
     page_icon=None,
@@ -521,6 +524,51 @@ def tab_compound_screening():
                 c1.markdown(f'<span style="color:{lip_c};font-weight:600;">Lipinski: {lip_s}</span> <span style="color:var(--text-muted);font-size:0.8rem;">({result.lipinski_violations} violations)</span>', unsafe_allow_html=True)
                 c2.markdown(f'<span style="color:{bbb_c};font-weight:600;">BBB Index (approx.)</span> <span style="color:var(--text-muted);font-size:0.8rem;">({result.bbb_score:.2f}) -- heuristic only, not experimental BBB measurement</span>', unsafe_allow_html=True)
                 c3.markdown(f'<span style="color:{veb_c};font-weight:600;">Veber: {veb_s}</span>', unsafe_allow_html=True)
+
+        if results:
+            st.markdown("---")
+            st.markdown('<div class="section-header">BBB / Intestinal Absorption \u2014 '
+                        'BOILED-Egg (simplified)</div>', unsafe_allow_html=True)
+            if not ADMET_HAS_RDKIT:
+                st.warning(
+                    "RDKit is not installed on this server, so the BOILED-Egg map "
+                    "cannot be computed. Add `rdkit` to requirements.txt and reboot. "
+                    "No values are fabricated in its place."
+                )
+            else:
+                st.caption(
+                    "Simplified BOILED-Egg: plots WLOGP vs TPSA against approximate "
+                    "HIA (white) and BBB (yolk) windows. This is a rectangular "
+                    "approximation of the published egg ellipses \u2014 confirm the "
+                    "exact classification on SwissADME (swissadme.ch)."
+                )
+                for i, result in enumerate(results):
+                    if not result.valid:
+                        continue
+                    ar = compute_admet(result.canonical_smiles)
+                    if not ar.ok:
+                        st.error(f"Compound {i+1}: {ar.error}")
+                        continue
+                    st.markdown(f"**Compound {i+1}:** `{result.canonical_smiles[:50]}`")
+                    bc1, bc2 = st.columns([1, 1])
+                    with bc1:
+                        g1, g2, g3 = st.columns(3)
+                        g1.metric("WLOGP", f"{ar.wlogp:.2f}")
+                        g2.metric("TPSA", f"{ar.tpsa:.1f}")
+                        g3.metric("MW", f"{ar.mw:.1f}")
+                        region_col = ("var(--success)" if ar.bbb_region_flag
+                                      else "var(--warning)" if ar.hia_region
+                                      else "var(--danger)")
+                        st.markdown(
+                            f'<span style="color:{region_col};font-weight:600;">'
+                            f'Region: {ar.bbb_region}</span>', unsafe_allow_html=True)
+                        st.caption(ar.note)
+                    with bc2:
+                        png = boiled_egg_png(ar)
+                        if png:
+                            st.image(png, use_container_width=True)
+                        else:
+                            st.info("matplotlib unavailable \u2014 numeric result shown only.")
 
         if results:
             st.markdown("---")
@@ -1073,6 +1121,37 @@ def tab_docking():
         st.caption("Tip: email isn't sent from the browser \u2014 download these "
                    "files (scores CSV, poses PDBQT, PDF) and attach them "
                    "yourself, or open the PDBQT in PyMOL/ChimeraX for figures.")
+
+    st.markdown("---")
+    with st.expander("\U0001f4d8 Molecular dynamics (MD) protocol \u2014 reference text only "
+                     "(this app does NOT run MD)"):
+        st.markdown(
+            "This is a methods template to adapt and WRITE UP; the app does not "
+            "execute MD. Fill in the actual values you used and cite the force "
+            "field / software papers. Nothing here is a result.\n\n"
+            "**System preparation**\n"
+            "- Protein from the docked complex; add hydrogens at pH 7.4; cap termini.\n"
+            "- Ligand parameters: GAFF2 / CGenFF (state which); RESP or AM1-BCC charges.\n"
+            "- Force field: e.g. AMBER ff19SB (protein) or CHARMM36m \u2014 state which.\n"
+            "- Solvate in a TIP3P octahedral box, \u2265 10 \u00c5 padding; neutralise with "
+            "Na\u207a/Cl\u207b to ~0.15 M.\n\n"
+            "**Equilibration**\n"
+            "- Minimise (steepest descent then conjugate gradient).\n"
+            "- Heat 0\u2192310 K under NVT with restraints on solute.\n"
+            "- NPT equilibration (1 atm, 310 K), gradually release restraints.\n\n"
+            "**Production**\n"
+            "- 100 ns (or state your length) NPT, 2 fs timestep, LINCS/SHAKE on "
+            "H-bonds, PME electrostatics, 310 K (Nos\u00e9-Hoover / Langevin), 1 atm "
+            "(Parrinello-Rahman / Monte Carlo barostat).\n\n"
+            "**Analysis to report**\n"
+            "- RMSD (protein backbone, ligand), RMSF per residue, radius of "
+            "gyration, H-bond occupancy, number of ligand-protein contacts, "
+            "MM/GBSA or MM/PBSA binding free energy (state method), and a free-"
+            "energy landscape only if you justify the collective variables.\n\n"
+            "\u26a0\ufe0f Report what you actually ran. A flat 20-ns FEL is not proof of "
+            "stable binding, and a single trajectory is not a replicate \u2014 state "
+            "n and the length honestly."
+        )
 
 
 # ============================================================
@@ -1851,6 +1930,14 @@ def tab_anonymizer():
                 st.markdown(f"  - **{gene}:** {status}")
 
         st.markdown("**Drug Sensitivity Profile:**")
+        st.error(
+            "\u26a0\ufe0f THESE IC50 VALUES ARE PLACEHOLDER/REFERENCE NUMBERS "
+            "BUILT INTO THE APP \u2014 THEY ARE NOT CITED AND NOT YOUR MEASURED "
+            "DATA. Do NOT paste any number from this table into your thesis. "
+            "Use them only to see how the interface works. For real IC50s, use "
+            "the '4PL IC50 Fit' tab on YOUR dose-response data, and cite primary "
+            "literature (with DOI/PMID) for any published value."
+        )
         drug_df = pd.DataFrame([
             {"Drug": drug, "IC50 (uM)": vals["ic50_um"], "Response": vals["response"]}
             for drug, vals in line_data["sensitivity"].items()
@@ -2587,12 +2674,181 @@ def tab_pdf_chat():
                 )
 
 
+def tab_kinetics():
+    st.markdown('<div class="section-header">4PL IC50 Fit \u2014 your own dose-response data</div>',
+                unsafe_allow_html=True)
+    st.caption(
+        "Paste YOUR measured dose-response pairs. The app fits a 4-parameter "
+        "logistic (4PL) model with scipy and reports the IC50, Hill slope, top, "
+        "bottom and R\u00b2. It will NEVER invent a number \u2014 if the data cannot be "
+        "fit, it tells you why. This mirrors GraphPad Prism's log(inhibitor) vs "
+        "response, variable slope."
+    )
+    if not HAS_SCIPY:
+        st.error("scipy is not installed on this server. Add `scipy` to "
+                 "requirements.txt and reboot \u2014 no fit can be computed otherwise.")
+        return
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown("**Data (one pair per line: dose, response %)**")
+        txt = st.text_area(
+            "dose, response",
+            value="0.1, 98\n0.3, 95\n1, 82\n3, 60\n10, 45\n30, 18\n100, 8",
+            height=200, label_visibility="collapsed",
+        )
+        st.caption("Dose must be > 0 (log-scale fit). Drop the zero/control row. "
+                   "Need at least 4 points. The example above is dummy data \u2014 "
+                   "replace it with yours.")
+    with c2:
+        st.markdown("**Units & notes**")
+        dose_unit = st.text_input("Dose unit (label only)", value="\u00b5M")
+        st.caption("The unit is a label for the axis/report only; it does not "
+                   "change the math. The IC50 comes out in the same unit as your doses.")
+
+    if st.button("Fit 4PL", type="primary", use_container_width=True):
+        doses, resp, err = parse_pairs(txt)
+        if err:
+            st.error(err)
+            return
+        fit = fit_4pl(doses, resp)
+        if not fit.ok:
+            st.error(fit.error)
+            return
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"IC50 ({dose_unit})", f"{fit.ic50:.4g}")
+        m2.metric("Hill slope", f"{fit.hill_slope:.3f}")
+        m3.metric("R\u00b2", f"{fit.r_squared:.4f}")
+        m4, m5, m6 = st.columns(3)
+        m4.metric("Top", f"{fit.top:.2f}")
+        m5.metric("Bottom", f"{fit.bottom:.2f}")
+        m6.metric("n points", str(fit.n_points))
+
+        if not fit.ic50_in_range:
+            st.warning(
+                f"\u26a0\ufe0f The fitted IC50 ({fit.ic50:.4g} {dose_unit}) lies OUTSIDE "
+                "your tested dose range. That means the IC50 was NOT actually "
+                "reached experimentally \u2014 report it as '> highest dose' (or "
+                "'< lowest dose'), not as a precise value. This is a valid, "
+                "honest result."
+            )
+        if fit.r_squared < 0.8:
+            st.warning(
+                f"Low R\u00b2 ({fit.r_squared:.3f}): the sigmoid fit is poor. Check for "
+                "a non-monotonic curve, too few points on the slope, or scatter. "
+                "Do not over-interpret this IC50."
+            )
+
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.scatter(fit.x_data, fit.y_data, color="#1d4ed8", zorder=3,
+                       label="Your data")
+            ax.plot(fit.x_curve, fit.y_curve, color="#dc2626", lw=2,
+                    label="4PL fit")
+            if fit.ic50_in_range:
+                ax.axvline(fit.ic50, ls="--", color="#6b7280",
+                           label=f"IC50 = {fit.ic50:.3g} {dose_unit}")
+            ax.set_xscale("log")
+            ax.set_xlabel(f"Dose ({dose_unit}, log scale)")
+            ax.set_ylabel("Response (%)")
+            ax.set_title("4PL dose-response fit")
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+            buf = io.BytesIO()
+            fig.tight_layout()
+            fig.savefig(buf, format="png", dpi=130)
+            plt.close(fig)
+            st.image(buf.getvalue(), use_container_width=False)
+        except Exception as e:
+            st.info(f"Plot unavailable ({e}); numeric result shown above.")
+
+        tbl = pd.DataFrame({
+            f"Dose ({dose_unit})": fit.x_data,
+            "Response (%)": fit.y_data,
+        })
+        st.download_button(
+            "Download your data + IC50 (CSV)",
+            data=(tbl.to_csv(index=False)
+                  + f"\n# IC50={fit.ic50},Hill={fit.hill_slope},"
+                    f"Top={fit.top},Bottom={fit.bottom},R2={fit.r_squared},"
+                    f"in_range={fit.ic50_in_range}\n"),
+            file_name="ic50_4pl_fit.csv", mime="text/csv",
+        )
+
+
+# BibTeX entries use the user's REAL, verified citations only. Every key maps to
+# a DOI or PMID the user must still verify before submission.
+MASTER_BIBTEX = r"""@article{banerjee2024protox3,
+  title   = {ProTox 3.0: a webserver for the prediction of toxicity of chemicals},
+  author  = {Banerjee, Priyanka and others},
+  journal = {Nucleic Acids Research},
+  year    = {2024},
+  doi     = {10.1093/nar/gkae303}
+}
+
+@article{daina2016boiledegg,
+  title   = {A BOILED-Egg to Predict Gastrointestinal Absorption and Brain Penetration of Small Molecules},
+  author  = {Daina, Antoine and Zoete, Vincent},
+  journal = {ChemMedChem},
+  year    = {2016},
+  doi     = {10.1002/cmdc.201600182}
+}
+
+@article{meng2011molecular,
+  title   = {Molecular Docking: A Powerful Approach for Structure-Based Drug Discovery},
+  author  = {Meng, Xuan-Yu and others},
+  journal = {Current Computer-Aided Drug Design},
+  year    = {2011},
+  note    = {PMID: 21532826}
+}
+
+@article{tcga2008comprehensive,
+  title   = {Comprehensive genomic characterization defines human glioblastoma genes and core pathways},
+  author  = {{The Cancer Genome Atlas Research Network}},
+  journal = {Nature},
+  year    = {2008},
+  note    = {PMID: 18772890}
+}
+"""
+
+
+def tab_citations():
+    st.markdown('<div class="section-header">Citation / BibTeX export</div>',
+                unsafe_allow_html=True)
+    st.warning(
+        "These are the REAL references for the methods this app implements "
+        "(ProTox, BOILED-Egg, molecular docking, TCGA GBM). You MUST verify "
+        "every DOI/PMID yourself before putting them in your thesis \u2014 no AI, "
+        "including this app, should be trusted to generate citations unchecked. "
+        "Add the primary paper(s) for any specific IC50 or biological claim you "
+        "make; those are not included here because they depend on your data."
+    )
+    st.code(MASTER_BIBTEX, language="bibtex")
+    st.download_button(
+        "Download master .bib",
+        data=MASTER_BIBTEX,
+        file_name="oncoagent_methods.bib",
+        mime="application/x-bibtex",
+    )
+    st.markdown("**Verify each entry here:**")
+    st.markdown(
+        "- ProTox 3.0 \u2014 https://doi.org/10.1093/nar/gkae303\n"
+        "- BOILED-Egg \u2014 https://doi.org/10.1002/cmdc.201600182\n"
+        "- Meng docking review \u2014 https://pubmed.ncbi.nlm.nih.gov/21532826/\n"
+        "- TCGA GBM \u2014 https://pubmed.ncbi.nlm.nih.gov/18772890/"
+    )
+
+
 def main():
     render_header()
     render_sidebar_chat()
 
-    tab_pdfchat, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab_pdfchat, tab1, tab2, tab3, tab4, tab_ic50, tab_cite, tab5 = st.tabs([
         "Chat with Papers", T["tab1"], T["tab2"], T["tab3"], T["tab4"],
+        "4PL IC50 Fit", "Citations",
         "AI Chat Assistant",
     ])
 
@@ -2606,6 +2862,10 @@ def main():
         tab_research()
     with tab4:
         tab_anonymizer()
+    with tab_ic50:
+        tab_kinetics()
+    with tab_cite:
+        tab_citations()
     with tab5:
         tab_chat_assistant()
 
