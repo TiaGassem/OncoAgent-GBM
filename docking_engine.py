@@ -78,13 +78,6 @@ class DockingResult:
     error: str = ""
     estimated_ki: str = ""
     binding_likelihood: str = ""
-    # ---- Reproducibility metadata (so a run can be reproduced / audited) ----
-    seed: int = 0
-    vina_version: str = ""
-    command: str = ""
-    timestamp: str = ""
-    exhaustiveness: int = 0
-    ligand_prep: str = ""
 
 
 def fetch_pdb_from_rcsb(pdb_id: str, output_dir: str) -> str:
@@ -592,19 +585,6 @@ def _convert_pdb_to_pdbqt(
     return output_path
 
 
-def _vina_version(vina_path: str = "") -> str:
-    """Best-effort AutoDock Vina version string, for reproducibility logging."""
-    vp = vina_path or shutil.which("vina") or shutil.which("autodock_vina")
-    if not vp:
-        return "unknown"
-    try:
-        p = subprocess.run([vp, "--version"], capture_output=True, text=True, timeout=20)
-        out = (p.stdout or p.stderr or "").strip().splitlines()
-        return out[0] if out else "unknown"
-    except Exception:
-        return "unknown"
-
-
 def run_vina_docking(
     receptor_pdbqt: str,
     ligand_pdbqt: str,
@@ -613,52 +593,32 @@ def run_vina_docking(
     num_modes: int = 9,
     energy_range: int = 3,
     cpu: int = 0,
-    seed: int = 42,
 ) -> DockingResult:
-    """Run AutoDock Vina docking and return results.
-
-    `seed` is fixed by default (42) so a run is REPRODUCIBLE; change it only if
-    you want to probe run-to-run variability. The engine version, exact command
-    and timestamp are recorded on the result for auditability.
-    """
-    from datetime import datetime as _dt
+    """Run AutoDock Vina docking and return results."""
     result = DockingResult(grid_box=grid_box)
-    result.seed = int(seed)
-    result.exhaustiveness = int(exhaustiveness)
-    result.timestamp = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    result.vina_version = _vina_version()
 
     if HAS_VINA_PYTHON:
         return _run_vina_python(
             receptor_pdbqt, ligand_pdbqt, grid_box,
-            exhaustiveness, num_modes, energy_range, cpu, result, seed
+            exhaustiveness, num_modes, energy_range, cpu, result
         )
 
     return _run_vina_cli(
         receptor_pdbqt, ligand_pdbqt, grid_box,
-        exhaustiveness, num_modes, energy_range, cpu, result, seed
+        exhaustiveness, num_modes, energy_range, cpu, result
     )
 
 
 def _run_vina_python(
     receptor_pdbqt: str, ligand_pdbqt: str, grid_box: GridBox,
     exhaustiveness: int, num_modes: int, energy_range: int,
-    cpu: int, result: DockingResult, seed: int = 42,
+    cpu: int, result: DockingResult,
 ) -> DockingResult:
     """Run docking using the Python Vina binding."""
     try:
-        try:
-            v = Vina(sf_name="vina", seed=int(seed))
-        except TypeError:
-            v = Vina(sf_name="vina")  # older binding: no seed kwarg
+        v = Vina(sf_name="vina")
         v.set_receptor(receptor_pdbqt)
         v.set_ligand_from_file(ligand_pdbqt)
-        result.command = (
-            f"vina(python) seed={seed} center=({grid_box.center_x},"
-            f"{grid_box.center_y},{grid_box.center_z}) "
-            f"size=({grid_box.size_x},{grid_box.size_y},{grid_box.size_z}) "
-            f"exhaustiveness={exhaustiveness} n_poses={num_modes}"
-        )
         v.compute_vina_maps(
             center=[grid_box.center_x, grid_box.center_y, grid_box.center_z],
             box_size=[grid_box.size_x, grid_box.size_y, grid_box.size_z],
@@ -697,7 +657,7 @@ def _run_vina_python(
 def _run_vina_cli(
     receptor_pdbqt: str, ligand_pdbqt: str, grid_box: GridBox,
     exhaustiveness: int, num_modes: int, energy_range: int,
-    cpu: int, result: DockingResult, seed: int = 42,
+    cpu: int, result: DockingResult,
 ) -> DockingResult:
     """Run docking using AutoDock Vina CLI."""
     vina_path = shutil.which("vina") or shutil.which("autodock_vina")
@@ -724,14 +684,11 @@ def _run_vina_cli(
             "--exhaustiveness", str(exhaustiveness),
             "--num_modes", str(num_modes),
             "--energy_range", str(energy_range),
-            "--seed", str(seed),
             "--out", output_pdbqt,
         ]
 
         if cpu > 0:
             cmd.extend(["--cpu", str(cpu)])
-
-        result.command = " ".join(cmd)
 
         try:
             proc = subprocess.run(

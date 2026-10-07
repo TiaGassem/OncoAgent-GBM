@@ -54,7 +54,6 @@ except ImportError:
 
 from kinetics import fit_4pl, parse_pairs, FitResult, HAS_SCIPY
 from admet import compute_admet, boiled_egg_png, AdmetResult, HAS_RDKIT as ADMET_HAS_RDKIT
-from validation import redock_rmsd, RMSDResult
 
 st.set_page_config(
     page_title="OncoAgent-GBM",
@@ -1014,13 +1013,6 @@ def tab_docking():
                 help="On free hosting keep this at 1\u20132. 0=auto uses ALL "
                      "cores at once, which bursts CPU and gets you throttled "
                      "faster.")
-        dock_seed = st.number_input(
-            "Random seed (reproducibility)", min_value=0, max_value=2_000_000_000,
-            value=42, step=1,
-            help="Fixed by default so the run is REPRODUCIBLE: same inputs + same "
-                 "seed = same result. Change it only to probe run-to-run "
-                 "variability. The seed, Vina version and exact command are "
-                 "recorded with every result.")
 
     if st.button("Execute Docking", type="primary", use_container_width=True):
         if "receptor_pdb" not in st.session_state:
@@ -1077,7 +1069,6 @@ def tab_docking():
             result = run_vina_docking(
                 receptor_pdbqt=receptor_pdbqt, ligand_pdbqt=ligand_pdbqt, grid_box=final_grid,
                 exhaustiveness=exhaustiveness, num_modes=num_modes, energy_range=energy_range, cpu=cpu_cores,
-                seed=int(dock_seed),
             )
 
         docking_ok = (not result.error) and (bool(result.poses) or result.binding_affinity != 0.0)
@@ -1102,24 +1093,6 @@ def tab_docking():
         r3.metric("Poses", result.num_modes)
 
         st.markdown(f"**Classification:** {result.binding_likelihood}")
-
-        # ---- Reproducibility / audit panel ----
-        with st.expander("Reproducibility & audit (seed, engine version, command)",
-                         expanded=False):
-            st.json({
-                "seed": result.seed,
-                "vina_version": result.vina_version or "unknown",
-                "exhaustiveness": result.exhaustiveness,
-                "timestamp_utc": result.timestamp,
-                "command": result.command,
-            })
-            st.caption("Record these in your thesis methods. Same inputs + same "
-                       "seed reproduce this result; a different seed probes "
-                       "run-to-run variability. Report the mean \u00b1 SD over a few "
-                       "seeds rather than a single number.")
-        # Save the docked top pose so the Validation tab can measure redocking RMSD.
-        if result.ligand_pdbqt:
-            st.session_state["last_docked_pose"] = result.ligand_pdbqt
 
         if result.poses:
             st.markdown("**Pose Rankings**")
@@ -2912,78 +2885,12 @@ def tab_citations():
     )
 
 
-def tab_validation():
-    st.markdown('<div class="section-header">Docking validation \u2014 redocking RMSD</div>',
-                unsafe_allow_html=True)
-    st.caption(
-        "The standard way to show a docking setup is TRUSTWORTHY: take a protein "
-        "solved WITH its ligand (a co-crystal structure), dock that same ligand "
-        "back, and measure how far the predicted pose is from the real "
-        "crystallographic pose. RMSD \u2264 2.0 \u00c5 = the protocol reproduces the native "
-        "pose. Do this for 3\u20135 structures and report it \u2014 it is what a reviewer "
-        "or PhD supervisor will ask for first."
-    )
-    st.markdown(
-        "**How to use:** paste the NATIVE ligand (extracted from the crystal "
-        "structure, as PDB/PDBQT) on the left, and a DOCKED pose on the right. "
-        "If you just ran a docking in the Molecular Docking tab, its top pose is "
-        "loaded automatically."
-    )
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Native (crystal) ligand \u2014 PDB/PDBQT**")
-        ref_text = st.text_area("reference", height=220, label_visibility="collapsed",
-                                placeholder="Paste the co-crystallised ligand block here...")
-    with c2:
-        st.markdown("**Docked pose \u2014 PDB/PDBQT**")
-        default_pose = st.session_state.get("last_docked_pose", "")
-        pose_text = st.text_area("docked", value=default_pose, height=220,
-                                 label_visibility="collapsed",
-                                 placeholder="Paste a docked pose, or run a dock first...")
-        if default_pose:
-            st.caption("Pre-filled with the top pose from your last docking run.")
-
-    if st.button("Compute redocking RMSD", type="primary", use_container_width=True):
-        if not ref_text.strip() or not pose_text.strip():
-            st.error("Paste BOTH the native ligand and a docked pose.")
-            return
-        res = redock_rmsd(ref_text, pose_text)
-        if not res.ok:
-            st.error(res.error)
-            return
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Heavy-atom RMSD", f"{res.rmsd:.3f} \u00c5")
-        m2.metric("Atoms (ref)", str(res.n_atoms_ref))
-        m3.metric("Atoms (pose)", str(res.n_atoms_pose))
-        if res.rmsd <= 2.0:
-            st.success(res.verdict)
-        elif res.rmsd <= 3.0:
-            st.warning(res.verdict)
-        else:
-            st.error(res.verdict)
-        st.caption("\u26a0\ufe0f " + res.note + " Report the RMSD honestly, including "
-                   "cases that FAIL \u2014 a failed redock is a real, informative result, "
-                   "not something to hide.")
-
-
 def main():
     render_header()
-    st.markdown(
-        '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;'
-        'padding:10px 16px;margin:-6px 0 14px;font-size:0.82rem;color:#991b1b;">'
-        '<b>Research & educational use only \u2014 NOT a clinical or diagnostic tool.</b> '
-        'Docking, ADMET and toxicity outputs are <i>computational predictions</i> that '
-        'must be confirmed experimentally. Nothing here is medical advice or a basis '
-        'for patient care. No results are fabricated: when a value cannot be computed, '
-        'the app says so.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
     render_sidebar_chat()
 
-    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_cite, tab5 = st.tabs([
-        "Chat with Papers", T["tab1"], T["tab2"], "Docking Validation",
-        T["tab3"], T["tab4"],
+    tab_pdfchat, tab1, tab2, tab3, tab4, tab_ic50, tab_cite, tab5 = st.tabs([
+        "Chat with Papers", T["tab1"], T["tab2"], T["tab3"], T["tab4"],
         "4PL IC50 Fit", "Citations",
         "AI Chat Assistant",
     ])
@@ -2994,8 +2901,6 @@ def main():
         tab_compound_screening()
     with tab2:
         tab_docking()
-    with tab_val:
-        tab_validation()
     with tab3:
         tab_research()
     with tab4:

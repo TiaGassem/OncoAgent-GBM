@@ -1,91 +1,135 @@
+---
+title: OncoAgent-GBM
+emoji: brain
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.32.0
+app_file: app.py
+pinned: true
+license: mit
+---
+
 # OncoAgent-GBM
 
-**An open-source, computational drug-discovery toolkit for glioblastoma (GBM) research.**
+Glioblastoma Multiforme Drug Discovery and Clinical Decision Support Platform.
 
-OncoAgent-GBM is a Streamlit web application that integrates structure-based
-docking, cheminformatics, pharmacokinetic prediction and literature tooling into
-a single, reproducible, **no-fabrication** workflow aimed at the CDC25
-phosphatase family (CDC25A/B/C) as therapeutic targets in glioblastoma.
+## Overview
 
-> **Research & educational use only — NOT a clinical or diagnostic tool.**
-> Every quantitative output is a *computational prediction* that must be
-> confirmed experimentally. The app never invents a value: when something
-> cannot be computed, it says so explicitly.
+OncoAgent-GBM is a local, privacy-first Python platform designed for Glioblastoma (GBM) drug discovery research. It integrates compound screening, molecular docking, literature research, clinical trial matching, and treatment planning into a single professional dashboard.
 
----
+**Live Demo:** [https://oncoagent-gbm.streamlit.app](https://oncoagent-gbm.streamlit.app)
 
 ## Features
 
-| Module | What it does | Engine / method |
-|---|---|---|
-| **Compound Screening** | Lipinski/Veber/BBB triage of SMILES | RDKit descriptors |
-| **BOILED-Egg** | Gastro-intestinal absorption & BBB permeation map | RDKit TPSA/WLOGP (simplified) |
-| **Molecular Docking** | Real receptor–ligand docking on YOUR inputs | AutoDock Vina + OpenBabel/Meeko |
-| **Docking Validation** | Redocking RMSD vs native crystallographic pose | heavy-atom RMSD |
-| **4PL IC50 Fit** | Dose–response fit on YOUR data | SciPy 4-parameter logistic |
-| **Toxicity pre-screen** | Rule-based structural-alert heuristic | transparent rules (NOT ProTox) |
-| **Literature** | PubMed search + APA/BibTeX citations | NCBI E-utilities |
-| **PDF Chat** | Extractive Q&A over uploaded papers | passage retrieval (quotes only) |
+### 1. Compound Screening & BBB Triage
+- Physicochemical analysis (MW, LogP, TPSA, HBD, HBA)
+- Blood-Brain Barrier (BBB) permeability scoring
+- Lipinski Rule of 5 and Veber rules compliance
+- 52-compound GBM drug library including NSC-95397 and related naphthoquinones
+- **Rule-based toxicity pre-screen** using structural alerts (PubChem patterns) + LogP/MW thresholds (Ames, hERG, hepatotoxicity, LD50, carcinogenicity). This is a transparent heuristic, **NOT ProTox-3** and not a machine-learning predictor.
 
-## Scientific integrity principles
+### 2. Molecular Docking
+- PDB receptor fetching from RCSB
+- AutoDock Vina docking engine (when available), plus SwissDock and CB-Dock2 as web alternatives
+- Validated reproducible grid (vGrid): center=(48.164, 10.08, 3.111), size=(29.5, 37.1, 26.9)
+- 3D visualization with py3Dmol
+- Phosphatase target database (Cdc25A/B/C, MKP-1, SHP-1/2, PTEN, PTP1B)
 
-1. **No fabrication.** No hardcoded binding scores, IC50s or toxicity values are
-   ever presented as results. Heuristic estimates are labelled as heuristics.
-2. **Reproducibility.** Every docking run records its random seed, AutoDock Vina
-   version, exact command and timestamp.
-3. **Validation first.** The Docking Validation tab measures redocking RMSD so
-   the docking setup can be shown to reproduce known crystallographic poses
-   (RMSD ≤ 2.0 Å) before any prediction is trusted.
-4. **Traceable citations.** Methods are tied to real references with DOI/PMID
-   (see `oncoagent_methods.bib`).
+### 3. Cell Line Database
+- 18 brain cancer cell lines (U251, U87, U373, T98G, A172, LN229, LN18, SF295, SNB19, U118, U138, H4, D54, CASI-1, GL261, RCAS-PDGFBA)
+- Mutation profiles (PTEN, TP53, IDH1, EGFR, NF1, BRAF, CDKN2A, MGMT)
+- Drug sensitivity data (IC50 values for 12+ compounds)
+- Cross-line comparison tool
 
-## Known limitations (read before citing)
+### 4. Clinical Trial Matching
+- 20+ GBM clinical trials with NCT IDs
+- Mutation-based eligibility matching algorithm
+- Profile validation and scoring
+- Evidence-based treatment recommendations
 
-- Docking uses rigid-receptor Vina with simplified protein preparation
-  (protonation, tautomers, waters, metal ions and flexible side chains are not
-  rigorously handled). Treat scores as **relative rankings**, not affinities.
-- When Meeko/OpenBabel are unavailable, ligands are docked **rigid** (no
-  rotatable bonds), which changes results; this is stated in the output.
-- Redocking RMSD is a direct heavy-atom RMSD without symmetry correction; for
-  symmetric ligands it is an upper bound.
-- BOILED-Egg boundaries are a rectangular approximation of the published egg
-  ellipses — confirm on SwissADME.
-- The toxicity module is a rule-based heuristic, **not** ProTox-3.
-- No molecular dynamics is run; the MD section is a methods template only.
+### 5. Literature & Bibliography
+- PubMed API search
+- APA and BibTeX citation generation
+- GBM reference guide
 
-## Deployment
+### 6. AI Chat Assistant (source-cited)
+- Context-aware GBM research Q&A with topic chips: Docking | Cell Line | Toxicity | Targets | Trials | Sources
+- Literature answers backed by a real PubMed-built paper index
+- No diagnosis and no clinical predictions; every reply ends with a disclaimer and validated source links
 
-Deployed on Streamlit Community Cloud **from this GitHub repository** (not from a
-zip). For real docking the repo must contain a `packages.txt` with exactly:
+### 7. Export
+- PDF audit reports (FPDF2)
+- Word/DOCX reports (python-docx)
+- CSV data export
+- Multilingual support (English, French, Arabic)
 
-```
-autodock-vina
-openbabel
-```
+## Tech Stack
 
-Python dependencies are in `requirements.txt` (RDKit, SciPy, Meeko, py3Dmol, …).
+| Component | Technology |
+|-----------|-----------|
+| Frontend | Streamlit |
+| Cheminformatics | RDKit |
+| Docking | AutoDock Vina |
+| Toxicity | Rule-based structural alerts (PubChem patterns) - NOT ProTox-3 |
+| PDF | FPDF2 |
+| Word | python-docx |
+| PII | Presidio |
+| API | PubMed E-utilities |
+
+## Installation
 
 ```bash
-# local run
+git clone https://github.com/TiaGassem/OncoAgent-GBM.git
+cd OncoAgent-GBM
 pip install -r requirements.txt
+python -m spacy download en_core_web_sm
 streamlit run app.py
 ```
 
-## How to validate the docking before you report any number
+## Deployment
 
-1. Pick a PDB with a co-crystallised ligand relevant to your target.
-2. Extract the native ligand; note its coordinates.
-3. Dock that same ligand back with the same grid box.
-4. Open **Docking Validation**, paste native + docked pose, read the RMSD.
-5. Report RMSD for 3–5 cases. Only then interpret new predictions.
+### Streamlit Community Cloud
+1. Push to GitHub
+2. Go to https://share.streamlit.io
+3. Select repo and deploy
 
-## Citing
+### Hugging Face Spaces
+1. Create a new Space at https://huggingface.co/new-space
+2. Select Streamlit SDK
+3. Upload project files
 
-If you connect this repository to Zenodo you obtain a citable DOI. Please also
-cite AutoDock Vina, RDKit and the method references listed in
-`oncoagent_methods.bib`, and verify every DOI/PMID yourself.
+## Project Structure
 
-## License & disclaimer
+```
+OncoAgent-GBM/
+  app.py                  # Main Streamlit dashboard
+  cheminformatics.py      # RDKit compound analysis
+  docking_engine.py       # Molecular docking engine
+  agent_evaluator.py      # Lead evaluation + PDF/DOCX reports
+  research_module.py      # PubMed literature search
+  anonymizer.py           # PII anonymization
+  requirements.txt        # Python dependencies
+  Dockerfile              # Container deployment
+  .streamlit/config.toml  # Streamlit theme config
+  LICENSE                 # MIT License
+```
 
-Provided for research and education. No warranty. Not for clinical, diagnostic
-or therapeutic use.
+## Validated Sources (credibility layer)
+
+Every result is traceable to a real public source:
+
+- Clinical trials: https://clinicaltrials.gov/
+- Cell lines: https://cellosaurus.org/ and https://dtp.cancer.gov/
+- Toxicity / structural alerts: https://pubchem.ncbi.nlm.nih.gov/
+- Docking: https://swissdock.ch/ , https://cbl-dock2.mohit.bio/ , https://autodock.scripps.edu/
+- Receptor structures: https://www.rcsb.org/
+- Literature: https://pubmed.ncbi.nlm.nih.gov/
+
+## Disclaimer
+
+This platform is for **research purposes only**. **Not medical advice.** All computational predictions must be validated experimentally. This does not constitute medical advice or clinical decision-making guidance.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
