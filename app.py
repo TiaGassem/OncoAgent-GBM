@@ -111,6 +111,35 @@ with st.sidebar:
     lang_choice = st.selectbox("Language / Langue / اللغة", ["en", "fr", "ar"], format_func=lambda x: {"en": "English", "fr": "Francais", "ar": "العربية"}[x])
 T = LANG[lang_choice]
 
+# Right-to-left layout for Arabic (real visible change: whole app flips RTL).
+if lang_choice == "ar":
+    st.markdown(
+        "<style>"
+        ".stApp, .main, section.main {direction: rtl;}"
+        ".stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp li, "
+        ".stApp label, .stApp .stMarkdown {text-align: right;}"
+        "code, pre, .stCode {direction: ltr; text-align: left; unicode-bidi: embed;}"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+# Honest notice: only interface labels are translated. Scientific terms, tool
+# output, formulas, SMILES, gene names and citations stay in English/Latin on
+# purpose (that is the convention for bioinformatics tools and keeps the data
+# verifiable). No text is machine-translated silently.
+if lang_choice != "en":
+    _notice = {
+        "fr": ("Remarque : seules les étiquettes de l'interface sont traduites. "
+               "Les termes scientifiques, SMILES, noms de gènes, formules et "
+               "citations restent en anglais (convention des outils de "
+               "bio-informatique, pour garder les données vérifiables)."),
+        "ar": ("ملاحظة: تُترجم واجهة الاستخدام فقط. تبقى المصطلحات العلمية "
+               "وأسماء الجينات والصيغ والمراجع بالإنجليزية (وفق العرف المتبع "
+               "في أدوات المعلوماتية الحيوية لضمان إمكانية التحقق من البيانات)."),
+    }[lang_choice]
+    with st.sidebar:
+        st.info(_notice)
+
 # ==================================================================
 # CREDIBILITY LAYER -- validated source links + agent master prompt.
 # Every chat answer ends with the disclaimer + these source links.
@@ -850,6 +879,20 @@ def tab_docking():
                 "Debian, so the build goes green and this banner turns to "
                 "\u2705 real docking."
             )
+
+    st.markdown(
+        '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;'
+        'padding:14px 18px;margin:6px 0 14px;">'
+        '<div style="font-weight:700;color:#1e3a8a;margin-bottom:6px;">'
+        'Quick start \u2014 3 steps</div>'
+        '<div style="color:#1e40af;font-size:0.92rem;line-height:1.6;">'
+        '<b>1.</b> Load a receptor (RCSB PDB ID, e.g. <code>2QBP</code>, or upload a .pdb). &nbsp; '
+        '<b>2.</b> Paste ONE ligand SMILES. &nbsp; '
+        '<b>3.</b> Pick a grid method (start with <b>Blind / whole protein</b> if unsure) '
+        'and press <b>Run docking</b>.'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
 
     with st.expander("How docking works here + web alternatives"):
         st.markdown(

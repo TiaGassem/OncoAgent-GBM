@@ -359,10 +359,17 @@ def smiles_to_pdbqt(smiles: str, output_path: str) -> str:
         try:
             preparator = MoleculePreparation()
             mol_setups = preparator.prepare(mol)
+            # Meeko API drift: prepare() may return a list of setups or a single
+            # setup; write_string() may return a str or a (str, ok, err) tuple.
             if mol_setups:
-                setup = mol_setups[0]
-                pdbqt_string, is_ok, _err = PDBQTWriterLegacy.write_string(setup)
-                if is_ok and "ROOT" in pdbqt_string:
+                setup = mol_setups[0] if isinstance(mol_setups, (list, tuple)) else mol_setups
+                written = PDBQTWriterLegacy.write_string(setup)
+                if isinstance(written, (list, tuple)):
+                    pdbqt_string = written[0]
+                    is_ok = written[1] if len(written) > 1 else True
+                else:
+                    pdbqt_string, is_ok = written, True
+                if is_ok and pdbqt_string and "ROOT" in pdbqt_string:
                     with open(output_path, "w", encoding="utf-8") as f:
                         f.write(pdbqt_string)
                     return output_path
@@ -396,11 +403,106 @@ def smiles_to_pdbqt(smiles: str, output_path: str) -> str:
         except Exception:
             pass  # fall through to flat writer
 
-    # ---- 3. Last-resort flat writer (no torsion tree) ----
-    if mol_pdb is None:
-        raise ValueError("Could not generate 3D coordinates for this ligand.")
-    pdbqt_path = _convert_pdb_to_pdbqt(pdb_path, output_path, is_ligand=True)
-    return pdbqt_path
+    # ---- 3. Guaranteed RDKit rigid writer (ALWAYS produces a valid file) ----
+    # Neither Meeko nor OpenBabel produced a torsion tree. Rather than hand Vina
+    # a tree-less file (which triggers "Unknown or inappropriate tag ..."), we
+    # write a VALID RIGID ligand PDBQT directly from the 3D RDKit molecule:
+    # ROOT / ENDROOT / TORSDOF 0. This is still a REAL docking input (no
+    # flexible torsions), never a fabricated score.
+    try:
+        return _rdkit_to_rigid_pdbqt(mol, output_path)
+    except Exception as e:
+        raise ValueError(
+            "Could not prepare a Vina-ready ligand PDBQT for this molecule "
+            f"(Meeko/OpenBabel unavailable, rigid writer failed: {e})."
+        )
+
+
+def _rdkit_to_rigid_pdbqt(mol, output_path: str) -> str:
+    """Write a VALID, Vina-parseable RIGID ligand PDBQT directly from an RDKit
+    molecule that already has a 3D conformer.
+
+    Guarantees the ROOT / ENDROOT / TORSDOF tags Vina requires, so the
+    "Unknown or inappropriate tag found in flex residue or ligand" parse error
+    can no longer happen. Nonpolar hydrogens are merged into their parent heavy
+    atom (AutoDock united-atom convention); polar H (on N/O/S) are kept as HD.
+    Partial charges are Gasteiger (RDKit). No score is fabricated — this only
+    builds the input file; Vina still computes the affinity.
+    """
+    if mol.GetNumConformers() == 0:
+        raise ValueError("molecule has no 3D conformer")
+    try:
+        AllChem.ComputeGasteigerCharges(mol)
+    except Exception:
+        pass
+    conf = mol.GetConformer()
+
+    def _charge(atom):
+        try:
+            q = float(atom.GetDoubleProp("_GasteigerCharge"))
+        except Exception:
+            q = 0.0
+        if q != q or q in (float("inf"), float("-inf")):  # NaN / inf guard
+            q = 0.0
+        return q
+
+    def _is_polar_h_parent(sym):
+        return sym in ("N", "O", "S")
+
+    # Merge nonpolar-H charges into their heavy-atom parent; mark H to skip.
+    merged = {}
+    skip = set()
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() == "H":
+            nbrs = atom.GetNeighbors()
+            if nbrs and not _is_polar_h_parent(nbrs[0].GetSymbol()):
+                parent = nbrs[0].GetIdx()
+                merged[parent] = merged.get(parent, 0.0) + _charge(atom)
+                skip.add(atom.GetIdx())
+
+    def _atom_type(atom):
+        sym = atom.GetSymbol()
+        if sym == "C":
+            return "A" if atom.GetIsAromatic() else "C"
+        if sym == "N":
+            # H-bond acceptor N (no attached H, neutral) -> NA, else N
+            return "NA" if (atom.GetTotalNumHs() == 0
+                            and atom.GetFormalCharge() <= 0) else "N"
+        if sym == "O":
+            return "OA"
+        if sym == "S":
+            return "SA"
+        if sym == "H":
+            return "HD"
+        if sym == "CL" or sym == "Cl":
+            return "Cl"
+        if sym == "BR" or sym == "Br":
+            return "Br"
+        return sym  # F, I, P, etc.
+
+    lines = ["REMARK  rigid ligand prepared by OncoAgent-GBM (RDKit fallback)",
+             "ROOT"]
+    serial = 0
+    for atom in mol.GetAtoms():
+        idx = atom.GetIdx()
+        if idx in skip:
+            continue
+        sym = atom.GetSymbol()
+        pos = conf.GetAtomPosition(idx)
+        q = _charge(atom) + merged.get(idx, 0.0)
+        atype = _atom_type(atom)
+        serial += 1
+        name = f"{sym}{serial}"[:4]
+        lines.append(
+            f"ATOM  {serial:>5d} {name:<4s} LIG A   1    "
+            f"{pos.x:8.3f}{pos.y:8.3f}{pos.z:8.3f}  1.00  0.00    "
+            f"{q:+6.3f} {atype:<2s}"
+        )
+    lines.append("ENDROOT")
+    lines.append("TORSDOF 0")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return output_path
 
 
 def pdb_to_pdbqt(pdb_path: str, output_path: str, is_receptor: bool = True) -> str:
