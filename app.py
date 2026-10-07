@@ -766,13 +766,18 @@ def tab_docking():
     #      can run real Vina docking, and exactly what is missing if not. ----
     est = engine_status()
     if est["can_dock"]:
-        bits = ["AutoDock Vina" + (" (binary)" if est["vina_binary"] else " (python)")]
-        bits.append("OpenBabel" if est["openbabel"] else "OpenBabel: missing")
-        bits.append("Meeko" if est["meeko"] else "Meeko: missing")
+        engine = "AutoDock Vina" + (" (binary)" if est["vina_binary"] else " (python)")
+        ob = "OpenBabel \u2713" if est["openbabel"] else "OpenBabel \u2717"
         st.success(
             "\u2705 Live docking engine detected on this server \u2014 real "
-            "AutoDock Vina runs on YOUR receptor + ligand. (" + ", ".join(bits) + ")"
+            "AutoDock Vina runs on YOUR receptor + ligand. (" + engine + ", " + ob + ")"
         )
+        if not est["meeko"]:
+            st.caption(
+                "Note: Meeko (optional ligand-prep helper) is not installed, "
+                "so ligands are prepared with OpenBabel instead \u2014 docking "
+                "still works normally."
+            )
     else:
         st.error(
             "\u274c Live docking engine NOT found on this server, so a real Vina "
@@ -898,13 +903,25 @@ def tab_docking():
                        "you can also use CB-Dock2 (web).")
 
         st.markdown("**Parameters**")
+        st.caption(
+            "Free hosting (Streamlit Community Cloud) gives a small shared CPU "
+            "budget. If you dock too hard it gets 'throttled' (temporarily "
+            "slowed). These defaults are set LOW on purpose so you stay under "
+            "the limit: lower exhaustiveness + fewer CPU cores = less likely to "
+            "be throttled. Raise them only if you move to a bigger host."
+        )
         pc1, pc2 = st.columns(2)
         with pc1:
-            exhaustiveness = st.slider("Exhaustiveness", 1, 32, 8)
-            num_modes = st.slider("Num. modes", 1, 20, 9)
+            exhaustiveness = st.slider("Exhaustiveness", 1, 32, 4,
+                help="Search effort. 4 is light and free-tier friendly; 8 is the "
+                     "Vina default but uses more CPU and may trigger throttling.")
+            num_modes = st.slider("Num. modes", 1, 20, 5)
         with pc2:
             energy_range = st.slider("Energy range (kcal/mol)", 1, 10, 3)
-            cpu_cores = st.slider("CPU cores (0=auto)", 0, 8, 0)
+            cpu_cores = st.slider("CPU cores (0=auto)", 0, 8, 1,
+                help="On free hosting keep this at 1\u20132. 0=auto uses ALL "
+                     "cores at once, which bursts CPU and gets you throttled "
+                     "faster.")
 
     if st.button("Execute Docking", type="primary", use_container_width=True):
         if "receptor_pdb" not in st.session_state:
@@ -2293,79 +2310,164 @@ def _render_chat_struct(r: dict):
             unsafe_allow_html=True)
 
 
+def _init_conversations():
+    """Set up the ChatGPT-style multi-conversation store in session_state."""
+    if "conversations" not in st.session_state:
+        st.session_state["conversations"] = {}
+    if "active_conv" not in st.session_state:
+        st.session_state["active_conv"] = None
+    # Always have at least one conversation to type into.
+    if not st.session_state["conversations"]:
+        _new_conversation()
+
+
+def _new_conversation() -> str:
+    """Create a fresh empty conversation and make it active. Returns its id."""
+    import uuid
+    cid = uuid.uuid4().hex[:8]
+    st.session_state.setdefault("conversations", {})
+    st.session_state["conversations"][cid] = {"title": "New chat", "turns": []}
+    st.session_state["active_conv"] = cid
+    return cid
+
+
 def tab_chat_assistant():
     st.markdown('<div class="section-header">AI Chat Assistant (Source-Cited)</div>', unsafe_allow_html=True)
     st.caption("Context-aware GBM research Q&A. Answers are grounded in validated "
                "sources and cite only the databases relevant to each question. "
                "No diagnosis, no clinical predictions.")
 
-    # Disclaimer shown ONCE here, not repeated under every message.
     with st.expander("Scope & disclaimer", expanded=False):
         st.markdown(f"**{NOT_MEDICAL_ADVICE}**")
         st.caption("Full source directory:")
         for label, url in AGENT_SOURCE_LINKS.items():
             st.markdown(f"- [{label}]({url})")
 
-    chip_prompts = {
-        "Docking": "How is the docking grid and Vina command configured?",
-        "Cell lines": "Which GBM cell lines are supported and where to verify them?",
-        "Toxicity": "How does the toxicity pre-screen work?",
-        "Targets": "Which phosphatase targets are relevant in GBM?",
-        "Trials": "How are clinical trials matched?",
-        "Literature": "Find PubMed literature on CDC25 in glioblastoma.",
-    }
-    st.caption("Quick topics:")
-    chip_cols = st.columns(len(chip_prompts))
-    preset = None
-    for col, (label, prompt) in zip(chip_cols, chip_prompts.items()):
-        if col.button(label, use_container_width=True, key=f"chip_{label}"):
-            preset = prompt
+    _init_conversations()
+    convs = st.session_state["conversations"]
 
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = []
+    # ---- ChatGPT-style layout: left = history + New chat, right = chat ----
+    left, right = st.columns([1, 3], gap="medium")
 
-    # Render prior turns compactly (strings already compact, no mega-boilerplate)
-    for role, msg in st.session_state["chat_history"]:
-        with st.chat_message(role):
-            st.markdown(msg)
+    with left:
+        if st.button("\u2795  New chat", use_container_width=True, type="primary"):
+            _new_conversation()
+            st.rerun()
+        st.caption("History")
+        # newest first
+        for cid in reversed(list(convs.keys())):
+            conv = convs[cid]
+            title = conv["title"] or "New chat"
+            if len(title) > 26:
+                title = title[:26] + "\u2026"
+            is_active = (cid == st.session_state["active_conv"])
+            c_sel, c_del = st.columns([5, 1])
+            with c_sel:
+                if st.button(("\u25B6 " if is_active else "") + title,
+                             key=f"conv_sel_{cid}", use_container_width=True):
+                    st.session_state["active_conv"] = cid
+                    st.rerun()
+            with c_del:
+                if st.button("\U0001F5D1", key=f"conv_del_{cid}",
+                             help="Delete this chat"):
+                    convs.pop(cid, None)
+                    if st.session_state["active_conv"] == cid:
+                        st.session_state["active_conv"] = (
+                            next(iter(reversed(convs)), None))
+                    if not convs:
+                        _new_conversation()
+                    st.rerun()
 
-    user_msg = st.chat_input("Ask about docking, cell lines, toxicity, targets, trials, or literature...")
-    if preset and not user_msg:
-        user_msg = preset
+    with right:
+        active = st.session_state["active_conv"]
+        if active not in convs:
+            active = _new_conversation()
+        conv = convs[active]
 
-    if user_msg:
-        st.session_state["chat_history"].append(("user", user_msg))
-        with st.chat_message("user"):
-            st.markdown(user_msg)
-        with st.chat_message("assistant"):
-            with st.spinner("Retrieving source-cited answer..."):
-                r = _chat_answer_struct(user_msg)
-            _render_chat_struct(r)
-        # store the compact string form for history re-render
-        st.session_state["chat_history"].append(("assistant", _chat_answer(user_msg)))
+        # Quick-topic chips
+        chip_prompts = {
+            "Docking": "How is the docking grid and Vina command configured?",
+            "Cell lines": "Which GBM cell lines are supported and where to verify them?",
+            "Toxicity": "How does the toxicity pre-screen work?",
+            "Targets": "Which phosphatase targets are relevant in GBM?",
+            "Trials": "How are clinical trials matched?",
+            "Literature": "Find PubMed literature on CDC25 in glioblastoma.",
+        }
+        st.caption("Quick topics:")
+        chip_cols = st.columns(len(chip_prompts))
+        preset = None
+        for col, (label, prompt) in zip(chip_cols, chip_prompts.items()):
+            if col.button(label, use_container_width=True, key=f"chip_{label}_{active}"):
+                preset = prompt
 
-    if st.session_state["chat_history"]:
-        if st.button("Clear conversation"):
-            st.session_state["chat_history"] = []
+        # Render the active conversation
+        if not conv["turns"]:
+            st.info("Start a new conversation \u2014 ask about docking, cell "
+                    "lines, toxicity, targets, trials, or literature.")
+        for role, msg in conv["turns"]:
+            with st.chat_message(role):
+                st.markdown(msg)
+
+        user_msg = st.chat_input("Ask about docking, cell lines, toxicity, "
+                                 "targets, trials, or literature...")
+        if preset and not user_msg:
+            user_msg = preset
+
+        if user_msg:
+            conv["turns"].append(("user", user_msg))
+            # Title the chat from its first user message (ChatGPT behaviour)
+            if conv["title"] == "New chat":
+                conv["title"] = user_msg.strip()
+            with st.chat_message("user"):
+                st.markdown(user_msg)
+            with st.chat_message("assistant"):
+                with st.spinner("Retrieving source-cited answer..."):
+                    answer = _chat_answer(user_msg)
+                st.markdown(answer)
+            conv["turns"].append(("assistant", answer))
             st.rerun()
 
 
 def render_sidebar_chat():
-    """Persistent source-cited AI chatbot docked in the sidebar (Anara/SciSpace style)."""
+    """Always-visible AI Assistant 'bubble' in the sidebar.
+
+    It is wired to the SAME multi-conversation store as the full ChatGPT-style
+    tab, so whatever you ask here lands in the active conversation and shows up
+    (with full history + New chat) in the 'AI Chat Assistant' tab.
+    """
     with st.sidebar:
         st.markdown("---")
-        st.markdown("### AI Assistant")
-        st.caption("Source-cited. No diagnosis / no clinical predictions.")
-        if "sidebar_chat" not in st.session_state:
-            st.session_state["sidebar_chat"] = []
-        for role, msg in st.session_state["sidebar_chat"][-6:]:
+        st.markdown(
+            "<div style='display:flex;align-items:center;gap:8px;'>"
+            "<span style='font-size:1.4rem'>\U0001F4AC</span>"
+            "<span style='font-weight:600;font-size:1.05rem'>AI Assistant</span>"
+            "</div>", unsafe_allow_html=True)
+        st.caption("Source-cited. Opens the full conversation in the "
+                   "'AI Chat Assistant' tab (history + New chat).")
+
+        _init_conversations()
+        convs = st.session_state["conversations"]
+        active = st.session_state["active_conv"]
+        if active not in convs:
+            active = _new_conversation()
+        conv = convs[active]
+
+        if st.button("\u2795 New chat", key="sidebar_new_chat",
+                     use_container_width=True):
+            _new_conversation()
+            st.rerun()
+
+        # Show the last few turns of the active conversation as the bubble.
+        for role, msg in conv["turns"][-4:]:
             with st.chat_message(role):
-                st.markdown(msg)
+                st.markdown(msg if len(msg) < 600 else msg[:600] + "\u2026")
+
         side_q = st.chat_input("Ask the assistant...", key="sidebar_chat_input")
         if side_q:
-            st.session_state["sidebar_chat"].append(("user", side_q))
-            answer = _chat_answer(side_q)
-            st.session_state["sidebar_chat"].append(("assistant", answer))
+            conv["turns"].append(("user", side_q))
+            if conv["title"] == "New chat":
+                conv["title"] = side_q.strip()
+            conv["turns"].append(("assistant", _chat_answer(side_q)))
             st.rerun()
 
 def tab_pdf_chat():
