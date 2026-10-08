@@ -78,6 +78,13 @@ class DockingResult:
     error: str = ""
     estimated_ki: str = ""
     binding_likelihood: str = ""
+    # ---- Reproducibility metadata (so a run can be reproduced / audited) ----
+    seed: int = 0
+    vina_version: str = ""
+    command: str = ""
+    timestamp: str = ""
+    exhaustiveness: int = 0
+    ligand_prep: str = ""
 
 
 def fetch_pdb_from_rcsb(pdb_id: str, output_dir: str) -> str:
@@ -263,17 +270,145 @@ def compute_grid_whole_protein(pdb_path: str, padding: float = 5.0) -> GridBox:
     )
 
 
-def detect_pocket_grid(pdb_path: str, padding: float = 6.0) -> tuple:
-    """CB-Dock2-style blind docking: detect the largest cavity with fpocket
-    and build a grid box centred on it. Returns (GridBox, info_message).
+def _read_protein_heavy_atoms(pdb_path: str) -> np.ndarray:
+    """Read heavy-atom (non-H) coordinates of ATOM records from a PDB."""
+    coords = []
+    with open(pdb_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.startswith("ATOM"):
+                continue
+            element = line[76:78].strip() if len(line) >= 78 else ""
+            name = line[12:16].strip()
+            tag = (element or name).upper()
+            # skip hydrogens (element H, or names like H, H1, HA...)
+            if element == "H" or (not element and name[:1] == "H"):
+                continue
+            try:
+                coords.append([float(line[30:38]), float(line[38:46]),
+                               float(line[46:54])])
+            except (ValueError, IndexError):
+                continue
+    return np.array(coords) if coords else np.empty((0, 3))
 
-    Falls back to a whole-protein box if fpocket is not installed or finds
-    no pocket. Never fabricates a pocket.
+
+# The 7 standard LIGSITE scan directions: 3 Cartesian axes + 4 cubic diagonals.
+_LIGSITE_DIRECTIONS = (
+    (1, 0, 0), (0, 1, 0), (0, 0, 1),
+    (1, 1, 1), (1, 1, -1), (1, -1, 1), (-1, 1, 1),
+)
+
+
+def _enclosed_along(prot: np.ndarray, d: tuple, max_steps: int) -> np.ndarray:
+    """For every voxel, True if protein lies within `max_steps` in BOTH the +d
+    and -d directions (a protein-solvent-protein 'PSP' event along axis d).
+
+    Uses accumulated np.roll shifts. Border wrap-around is a known, minor
+    approximation (the box margin is empty solvent on all sides).
+    """
+    dx, dy, dz = d
+    plus = np.zeros_like(prot, dtype=bool)
+    minus = np.zeros_like(prot, dtype=bool)
+    for step in range(1, max_steps + 1):
+        # protein found looking in the +d direction (shift grid toward -d)
+        plus |= np.roll(np.roll(np.roll(prot, -step * dx, 0),
+                                -step * dy, 1), -step * dz, 2)
+        minus |= np.roll(np.roll(np.roll(prot, step * dx, 0),
+                                 step * dy, 1), step * dz, 2)
+    return plus & minus
+
+
+def detect_pocket_ligsite(pdb_path: str, spacing: float = 1.5,
+                          atom_radius: float = 1.6, scan_angstrom: float = 10.0,
+                          psp_threshold: int = 5, padding: float = 5.0) -> tuple:
+    """Parameter-free geometric pocket detection (LIGSITE-style) in pure NumPy.
+
+    No external binary required (works where fpocket is unavailable, e.g.
+    Streamlit Community Cloud). It discretises the protein onto a 3D grid,
+    flags buried solvent voxels via the LIGSITE 7-direction protein-solvent-
+    protein (PSP) criterion, keeps the largest connected cavity, and centres
+    the docking box on it. It NEVER fabricates a pocket: if nothing qualifies
+    it returns (None, reason) so the caller can fall back honestly.
+
+    Method references: Hendlich et al. 1997 (LIGSITE); Huang & Schroeder 2006
+    (LIGSITEcs). Returns (GridBox | None, info_message).
+    """
+    try:
+        from scipy import ndimage
+    except ImportError:
+        return (None, "SciPy not available - cannot run geometric pocket detection.")
+
+    atoms = _read_protein_heavy_atoms(pdb_path)
+    if atoms.shape[0] < 20:
+        return (None, "Too few protein atoms for pocket detection.")
+
+    margin = scan_angstrom + atom_radius + spacing
+    lo = atoms.min(axis=0) - margin
+    hi = atoms.max(axis=0) + margin
+    dims = np.ceil((hi - lo) / spacing).astype(int) + 1
+    # guard against pathological memory use
+    if int(dims[0]) * int(dims[1]) * int(dims[2]) > 8_000_000:
+        return (None, "Protein too large for in-memory pocket grid.")
+
+    # Mark protein voxels: every voxel within `atom_radius` of a heavy atom.
+    prot = np.zeros(tuple(int(x) for x in dims), dtype=bool)
+    idx = np.round((atoms - lo) / spacing).astype(int)
+    idx = np.clip(idx, 0, dims - 1)
+    prot[idx[:, 0], idx[:, 1], idx[:, 2]] = True
+    r_vox = max(1, int(round(atom_radius / spacing)))
+    prot = ndimage.binary_dilation(prot, iterations=r_vox)
+
+    max_steps = max(1, int(round(scan_angstrom / spacing)))
+    psp = np.zeros(prot.shape, dtype=np.uint8)
+    for d in _LIGSITE_DIRECTIONS:
+        psp += _enclosed_along(prot, d, max_steps).astype(np.uint8)
+
+    pocket = (~prot) & (psp >= psp_threshold)
+    if not pocket.any():
+        return (None, "No enclosed cavity found by geometric detection.")
+
+    # Largest connected cavity (26-connectivity).
+    labels, n = ndimage.label(pocket, structure=np.ones((3, 3, 3)))
+    if n == 0:
+        return (None, "No connected cavity found.")
+    sizes = ndimage.sum(np.ones_like(labels), labels, index=range(1, n + 1))
+    best = int(np.argmax(sizes)) + 1
+    pts = np.argwhere(labels == best)
+    coords = lo + pts * spacing
+
+    center = coords.mean(axis=0)
+    span = coords.max(axis=0) - coords.min(axis=0)
+    box = GridBox(
+        center_x=round(float(center[0]), 3),
+        center_y=round(float(center[1]), 3),
+        center_z=round(float(center[2]), 3),
+        size_x=round(max(float(span[0]) + 2 * padding, 16.0), 1),
+        size_y=round(max(float(span[1]) + 2 * padding, 16.0), 1),
+        size_z=round(max(float(span[2]) + 2 * padding, 16.0), 1),
+    )
+    n_vox = int(pts.shape[0])
+    return (box, f"Geometric pocket detection (LIGSITE) found the top cavity "
+                 f"({n_vox} grid points); box centred on it.")
+
+
+def detect_pocket_grid(pdb_path: str, padding: float = 6.0) -> tuple:
+    """CB-Dock2-style blind docking: detect the largest cavity and build a grid
+    box centred on it. Returns (GridBox, info_message).
+
+    Order of preference:
+      1. fpocket (if the binary is installed) - the reference cavity detector.
+      2. LIGSITE-style geometric detection in pure NumPy (no binary needed) -
+         so a DEFINED cavity is used even on hosts without fpocket.
+      3. Whole-protein (blind) box - last resort, clearly labelled as such.
+    Never fabricates a pocket.
     """
     fpocket = shutil.which("fpocket")
     if fpocket is None:
+        box, msg = detect_pocket_ligsite(pdb_path)
+        if box is not None:
+            return (box, msg)
         return (compute_grid_whole_protein(pdb_path),
-                "fpocket not installed - using a whole-protein (blind) box.")
+                f"{msg} Falling back to a whole-protein (blind) box - "
+                "low confidence; prefer Residue-based or co-crystal ligand.")
     try:
         workdir = tempfile.mkdtemp()
         local_pdb = os.path.join(workdir, "receptor.pdb")
@@ -585,6 +720,19 @@ def _convert_pdb_to_pdbqt(
     return output_path
 
 
+def _vina_version(vina_path: str = "") -> str:
+    """Best-effort AutoDock Vina version string, for reproducibility logging."""
+    vp = vina_path or shutil.which("vina") or shutil.which("autodock_vina")
+    if not vp:
+        return "unknown"
+    try:
+        p = subprocess.run([vp, "--version"], capture_output=True, text=True, timeout=20)
+        out = (p.stdout or p.stderr or "").strip().splitlines()
+        return out[0] if out else "unknown"
+    except Exception:
+        return "unknown"
+
+
 def run_vina_docking(
     receptor_pdbqt: str,
     ligand_pdbqt: str,
@@ -593,32 +741,52 @@ def run_vina_docking(
     num_modes: int = 9,
     energy_range: int = 3,
     cpu: int = 0,
+    seed: int = 42,
 ) -> DockingResult:
-    """Run AutoDock Vina docking and return results."""
+    """Run AutoDock Vina docking and return results.
+
+    `seed` is fixed by default (42) so a run is REPRODUCIBLE; change it only if
+    you want to probe run-to-run variability. The engine version, exact command
+    and timestamp are recorded on the result for auditability.
+    """
+    from datetime import datetime as _dt
     result = DockingResult(grid_box=grid_box)
+    result.seed = int(seed)
+    result.exhaustiveness = int(exhaustiveness)
+    result.timestamp = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    result.vina_version = _vina_version()
 
     if HAS_VINA_PYTHON:
         return _run_vina_python(
             receptor_pdbqt, ligand_pdbqt, grid_box,
-            exhaustiveness, num_modes, energy_range, cpu, result
+            exhaustiveness, num_modes, energy_range, cpu, result, seed
         )
 
     return _run_vina_cli(
         receptor_pdbqt, ligand_pdbqt, grid_box,
-        exhaustiveness, num_modes, energy_range, cpu, result
+        exhaustiveness, num_modes, energy_range, cpu, result, seed
     )
 
 
 def _run_vina_python(
     receptor_pdbqt: str, ligand_pdbqt: str, grid_box: GridBox,
     exhaustiveness: int, num_modes: int, energy_range: int,
-    cpu: int, result: DockingResult,
+    cpu: int, result: DockingResult, seed: int = 42,
 ) -> DockingResult:
     """Run docking using the Python Vina binding."""
     try:
-        v = Vina(sf_name="vina")
+        try:
+            v = Vina(sf_name="vina", seed=int(seed))
+        except TypeError:
+            v = Vina(sf_name="vina")  # older binding: no seed kwarg
         v.set_receptor(receptor_pdbqt)
         v.set_ligand_from_file(ligand_pdbqt)
+        result.command = (
+            f"vina(python) seed={seed} center=({grid_box.center_x},"
+            f"{grid_box.center_y},{grid_box.center_z}) "
+            f"size=({grid_box.size_x},{grid_box.size_y},{grid_box.size_z}) "
+            f"exhaustiveness={exhaustiveness} n_poses={num_modes}"
+        )
         v.compute_vina_maps(
             center=[grid_box.center_x, grid_box.center_y, grid_box.center_z],
             box_size=[grid_box.size_x, grid_box.size_y, grid_box.size_z],
@@ -657,7 +825,7 @@ def _run_vina_python(
 def _run_vina_cli(
     receptor_pdbqt: str, ligand_pdbqt: str, grid_box: GridBox,
     exhaustiveness: int, num_modes: int, energy_range: int,
-    cpu: int, result: DockingResult,
+    cpu: int, result: DockingResult, seed: int = 42,
 ) -> DockingResult:
     """Run docking using AutoDock Vina CLI."""
     vina_path = shutil.which("vina") or shutil.which("autodock_vina")
@@ -684,11 +852,14 @@ def _run_vina_cli(
             "--exhaustiveness", str(exhaustiveness),
             "--num_modes", str(num_modes),
             "--energy_range", str(energy_range),
+            "--seed", str(seed),
             "--out", output_pdbqt,
         ]
 
         if cpu > 0:
             cmd.extend(["--cpu", str(cpu)])
+
+        result.command = " ".join(cmd)
 
         try:
             proc = subprocess.run(
