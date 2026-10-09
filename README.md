@@ -27,6 +27,20 @@ phosphatase family (CDC25A/B/C) as therapeutic targets in glioblastoma.
 | **Toxicity pre-screen** | Rule-based structural-alert heuristic | transparent rules (NOT ProTox) |
 | **Literature** | PubMed search + APA/BibTeX citations | NCBI E-utilities |
 | **PDF Chat** | Extractive Q&A over uploaded papers | passage retrieval (quotes only) |
+| **AI Chat Assistant** | Source-cited GBM Q&A, with optional bring-your-own-key fluent mode | grounded retrieval + optional user LLM (rephrase only) |
+| **Lab protocol library** | 16 open-access GBM/oncology assay templates (spheroid, viability/MTT, scratch, clonogenic, Western blot, qRT-PCR, flow cytometry cell-cycle & apoptosis, caspase-3/7, IF/ICC, transwell, comet, EdU/BrdU, docking+MD, in-silico ADMET) | templates with `[verify]` placeholders + live PubMed/PMC lookup |
+| **My Lab Notebook** | Write your own notes/protocols, keep them private to your session, export to Word/PDF/Markdown, encrypted backup | python-docx + fpdf2 + Fernet (AES) |
+
+### Privacy of the Lab Notebook
+Notebook entries live **only in your browser session** — nothing is written to the
+server, no shared database, no logs. Keep your notes by downloading them (Word /
+PDF / Markdown) or an AES-encrypted passphrase backup you can re-import. The
+passphrase is never seen or stored; lose it and the backup is unrecoverable.
+
+### Use it on phone / tablet / PC
+It is a responsive web app: open the link on any device. To get an app-like icon,
+"Add to Home Screen" (iOS Safari / Android Chrome) or "Install this site as an app"
+(Chrome/Edge on Windows/Mac). No app store, research use only.
 
 ## Scientific integrity principles
 

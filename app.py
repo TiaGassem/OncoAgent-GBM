@@ -71,11 +71,19 @@ except Exception:
     polish_answer = None
 
 try:
-    from protocols import PROTOCOL_LIBRARY, list_protocols, get_protocol
+    from protocols import (PROTOCOL_LIBRARY, list_protocols, get_protocol,
+                           protocol_pubmed_query, protocol_source_links)
     HAS_PROTOCOLS = True
 except Exception:
     HAS_PROTOCOLS = False
     PROTOCOL_LIBRARY = {}
+
+try:
+    import labnotebook
+    HAS_NOTEBOOK = True
+except Exception:
+    HAS_NOTEBOOK = False
+    labnotebook = None
 
 st.set_page_config(
     page_title="OncoAgent-GBM",
@@ -2590,6 +2598,93 @@ def _render_answer_mode():
                 st.info("No key entered — answers stay grounded cited-only.")
 
 
+def _render_protocol_finder(key_prefix: str, store: list | None = None,
+                            owner: str = ""):
+    """Type ANY experiment/protocol name -> get REAL protocols from real sources.
+
+    - Runs a LIVE PubMed search shaped toward method/protocol papers and shows
+      real hits (title, journal, year, PMID/DOI, link).
+    - Also gives one-click search links into PubMed, Europe PMC, PMC, protocols.io,
+      Bio-protocol, Nature/Springer Protocols for the same term.
+    Nothing is invented: every result is a real record you can open and verify.
+    If `store` is given, each hit can be saved into your Lab Notebook with its
+    real citation.
+    """
+    if not HAS_PROTOCOLS:
+        return
+    st.markdown("**Find any protocol by name (real sources)**")
+    st.caption("Type any assay or experiment — e.g. 'MTT assay', 'annexin V "
+               "apoptosis', 'transwell invasion', 'CRISPR knockout', 'ChIP-seq'. "
+               "You get real published method papers + direct links to the main "
+               "protocol repositories. Verify every PMID/DOI yourself.")
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        term = st.text_input("Protocol / experiment name",
+                             key=f"{key_prefix}_term",
+                             placeholder="e.g. clonogenic assay, western blot, qPCR...")
+    with c2:
+        go = st.button("Search", key=f"{key_prefix}_go", use_container_width=True)
+
+    if term.strip():
+        links = protocol_source_links(term)
+        if links:
+            st.caption("Open live results in a protocol repository:")
+            st.markdown("  ·  ".join(f"[{lbl}]({url})" for lbl, url in links))
+
+    if go and term.strip():
+        with st.spinner("Searching PubMed for real method/protocol papers..."):
+            try:
+                hits = search_pubmed(protocol_pubmed_query(term), max_results=8)
+            except Exception as e:
+                hits = []
+                st.warning(f"Live lookup failed: {str(e)[:140]}")
+        st.session_state[f"{key_prefix}_hits"] = hits
+
+    hits = st.session_state.get(f"{key_prefix}_hits") or []
+    if hits:
+        st.markdown(f"**{len(hits)} real published results** (verify before citing):")
+        for h in hits:
+            try:
+                cite = format_citation_apa(h)
+            except Exception:
+                cite = getattr(h, "title", str(h))
+            pmid = getattr(h, "pmid", "")
+            doi = getattr(h, "doi", "")
+            url = getattr(h, "url", "") or (
+                f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "")
+            line = f"- {cite}"
+            tail = []
+            if pmid:
+                tail.append(f"PMID: {pmid}")
+            if doi:
+                tail.append(f"DOI: {doi}")
+            if url:
+                tail.append(f"[open]({url})")
+            if tail:
+                line += "  ·  " + "  ·  ".join(tail)
+            st.markdown(line)
+            if store is not None and pmid:
+                if st.button("Save this to my notebook",
+                             key=f"{key_prefix}_save_{pmid}"):
+                    body = (f"{cite}\n\n"
+                            + (f"PMID: {pmid}\n" if pmid else "")
+                            + (f"DOI: {doi}\n" if doi else "")
+                            + (f"Link: {url}\n" if url else "")
+                            + "\n(Paste the method steps you follow here, then "
+                              "fill in your own SOP values.)")
+                    store.append(labnotebook.new_entry(
+                        title=getattr(h, "title", term)[:120] or term,
+                        author=owner, category="Protocol", tags=term,
+                        body=body,
+                        source=f"PMID {pmid}" + (f"; DOI {doi}" if doi else "")))
+                    st.success("Saved to 'My entries' — verify the source and add "
+                               "your steps.")
+                    st.rerun()
+    elif go:
+        st.info("No PubMed hits for that exact term — try the repository links "
+                "above, or rephrase (e.g. add 'assay' or 'protocol').")
+
+
 def _render_protocol_library():
     """Open-access lab-protocol library. Numeric params are VERIFY placeholders;
     references are real open-access methods papers. Optionally pulls live PMC
@@ -2598,9 +2693,11 @@ def _render_protocol_library():
     if not HAS_PROTOCOLS:
         return
     with st.expander("Lab protocol library (open-access, research-use)", expanded=False):
-        st.caption("Standard assay templates. Numeric values marked [VERIFY] are "
-                   "placeholders — confirm against the cited open-access method "
-                   "before use. No clinical use.")
+        _render_protocol_finder("libfind")
+        st.markdown("---")
+        st.caption("Or pick a ready-made standard assay template. Numeric values "
+                   "marked [VERIFY] are placeholders — confirm against the cited "
+                   "open-access method before use. No clinical use.")
         names = list_protocols()
         if not names:
             st.info("No protocols available.")
@@ -3122,6 +3219,246 @@ def tab_validation():
                    "not something to hide.")
 
 
+def _nb_store() -> list:
+    """Per-SESSION, private notebook list. Never written server-side."""
+    if "lab_notebook" not in st.session_state:
+        st.session_state["lab_notebook"] = []
+    return st.session_state["lab_notebook"]
+
+
+def _nb_download_row(entries: list, owner: str, key: str) -> bool:
+    """Three download buttons (Word / PDF / Markdown) for the given entries."""
+    d1, d2, d3 = st.columns(3)
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    with d1:
+        docx = labnotebook.entries_to_docx(entries, owner)
+        st.download_button("⬇ Word (.docx)", data=docx,
+                           file_name=f"labnotebook_{ts}.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           use_container_width=True, key=f"{key}_docx",
+                           disabled=not docx)
+    with d2:
+        pdf = labnotebook.entries_to_pdf(entries, owner)
+        st.download_button("⬇ PDF (.pdf)", data=pdf,
+                           file_name=f"labnotebook_{ts}.pdf",
+                           mime="application/pdf", use_container_width=True,
+                           key=f"{key}_pdf", disabled=not pdf)
+    with d3:
+        md = labnotebook.entries_to_markdown(entries, owner)
+        st.download_button("⬇ Markdown (.md)", data=md,
+                           file_name=f"labnotebook_{ts}.md",
+                           mime="text/markdown", use_container_width=True,
+                           key=f"{key}_md")
+    return True
+
+
+def tab_lab_notebook():
+    st.markdown('<div class="section-header">My Lab Notebook & Protocols</div>',
+                unsafe_allow_html=True)
+    st.caption("Write your own lab notes, observations and protocols, keep them "
+               "for this session, and download them as Word, PDF or Markdown. "
+               "Research/educational use only — not a clinical record.")
+
+    if not HAS_NOTEBOOK:
+        st.warning("Notebook module unavailable in this deployment.")
+        return
+
+    with st.expander("Your privacy (read me)", expanded=False):
+        st.markdown(
+            "- Your entries live **only in your own browser session** — they are "
+            "**not** saved on the server, **not** in any shared database, and "
+            "**not** logged.\n"
+            "- Nobody else can see your notes; a different user gets a separate, "
+            "empty session.\n"
+            "- To **keep** your notes, download them to your device (Word / PDF / "
+            "Markdown) or save an **encrypted backup** you can re-import later.\n"
+            "- The passphrase backup is AES-encrypted (key derived from your "
+            "passphrase); we never see or store the passphrase — if you lose it, "
+            "the backup cannot be recovered.\n"
+            "- When your session ends, the server keeps **no copy**.")
+
+    store = _nb_store()
+    owner = st.text_input("Your name / lab (optional, used on exports)",
+                          value=st.session_state.get("nb_owner", ""),
+                          key="nb_owner_in")
+    st.session_state["nb_owner"] = owner
+
+    tab_write, tab_browse, tab_proto, tab_backup = st.tabs(
+        ["Write entry", f"My entries ({len(store)})",
+         "Find protocols (any source)", "Save / backup / restore"])
+
+    # ---------- Write ----------
+    with tab_write:
+        edit_id = st.session_state.get("nb_edit_id")
+        editing = None
+        if edit_id:
+            editing = next((e for e in store if e["id"] == edit_id), None)
+        if editing:
+            st.info(f"Editing: {editing['title']}")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            title = st.text_input("Title", value=editing["title"] if editing else "",
+                                  key="nb_title")
+        with c2:
+            cats = labnotebook.CATEGORIES
+            idx = cats.index(editing["category"]) if editing and editing["category"] in cats else 0
+            category = st.selectbox("Category", cats, index=idx, key="nb_cat")
+        c3, c4 = st.columns(2)
+        with c3:
+            author = st.text_input("Author", value=editing["author"] if editing else owner,
+                                   key="nb_author")
+        with c4:
+            tags = st.text_input("Tags (comma-separated)",
+                                 value=editing["tags"] if editing else "", key="nb_tags")
+        source = st.text_input("Source / reference (verify PMID/DOI yourself)",
+                               value=editing["source"] if editing else "", key="nb_source")
+        body = st.text_area("Notes / protocol (Markdown allowed)",
+                            value=editing["body"] if editing else "",
+                            height=320, key="nb_body")
+        bcol1, bcol2, _ = st.columns([1, 1, 2])
+        with bcol1:
+            if st.button("💾 Save entry", type="primary", use_container_width=True):
+                if editing:
+                    editing.update(title=title.strip() or "Untitled entry",
+                                   category=category, author=author.strip(),
+                                   tags=tags.strip(), source=source.strip(),
+                                   body=body,
+                                   updated=datetime.now().strftime("%Y-%m-%d %H:%M"))
+                    st.session_state["nb_edit_id"] = None
+                    st.success("Entry updated.")
+                else:
+                    store.append(labnotebook.new_entry(
+                        title=title, author=author, category=category,
+                        tags=tags, body=body, source=source))
+                    st.success("Entry saved to this session.")
+                st.rerun()
+        with bcol2:
+            if editing and st.button("Cancel edit", use_container_width=True):
+                st.session_state["nb_edit_id"] = None
+                st.rerun()
+        st.caption(labnotebook._DISCLAIMER)
+
+    # ---------- Browse ----------
+    with tab_browse:
+        if not store:
+            st.info("No entries yet — write one in the 'Write entry' tab.")
+        else:
+            _nb_download_row(store, owner, key="browse_top")
+            for e in reversed(store):
+                with st.expander(f"{e['title']}  —  {e['category']}  ·  {e['created']}"):
+                    meta = []
+                    if e.get("author"):
+                        meta.append(f"**Author:** {e['author']}")
+                    if e.get("tags"):
+                        meta.append(f"**Tags:** {e['tags']}")
+                    if e.get("source"):
+                        meta.append(f"**Source:** {e['source']}")
+                    if meta:
+                        st.caption("  ·  ".join(meta))
+                    st.markdown(e.get("body", "") or "_(empty)_")
+                    ec1, ec2, ec3 = st.columns([1, 1, 3])
+                    with ec1:
+                        if st.button("Edit", key=f"ed_{e['id']}"):
+                            st.session_state["nb_edit_id"] = e["id"]
+                            st.rerun()
+                    with ec2:
+                        if st.button("Delete", key=f"del_{e['id']}"):
+                            store.remove(e)
+                            st.rerun()
+                    with ec3:
+                        st.download_button(
+                            "Word", data=labnotebook.entries_to_docx([e], owner),
+                            file_name=f"labnote_{e['id']}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key=f"dw_{e['id']}")
+
+    # ---------- Start from a protocol template ----------
+    with tab_proto:
+        if not HAS_PROTOCOLS:
+            st.info("Protocol templates unavailable in this build.")
+        else:
+            _render_protocol_finder("nbfind", store=store, owner=owner)
+            st.markdown("---")
+            st.caption("Or load a standard assay template into a new editable entry. "
+                       "Numeric values are [verify] placeholders — fill them with "
+                       "YOUR validated SOP values before use.")
+            pick = st.selectbox("Template", list_protocols(), key="nb_proto_pick")
+            p = get_protocol(pick) or {}
+            if p.get("summary"):
+                st.caption(p["summary"])
+            if st.button("➕ Add this template as a new entry", type="primary"):
+                lines = [p.get("summary", ""), "", "## Steps"]
+                for i, s in enumerate(p.get("steps", []), 1):
+                    lines.append(f"{i}. {s}")
+                refs = p.get("oa_refs", [])
+                if refs:
+                    lines += ["", "## References (verify PMID/DOI)"] + [f"- {r}" for r in refs]
+                store.append(labnotebook.new_entry(
+                    title=pick, author=owner, category="Protocol",
+                    tags="template", body="\n".join(lines),
+                    source="OncoAgent-GBM open-access template (verify sources)"))
+                st.success("Template added to 'My entries' — edit and fill the "
+                           "[verify] placeholders.")
+                st.rerun()
+
+    # ---------- Backup / restore ----------
+    with tab_backup:
+        if not store:
+            st.info("Nothing to back up yet.")
+        else:
+            st.markdown("**Download all entries**")
+            _nb_download_row(store, owner, key="backup_all")
+            st.markdown("---")
+            st.markdown("**Encrypted backup (passphrase-protected)**")
+            if not labnotebook.HAS_CRYPTO:
+                st.caption("Encryption library not available in this build — use "
+                           "the plain JSON backup below instead.")
+            else:
+                pw = st.text_input("Passphrase (remember it — cannot be recovered)",
+                                   type="password", key="nb_pw")
+                if pw:
+                    blob = labnotebook.encrypt_backup(store, pw, owner)
+                    if blob:
+                        st.download_button(
+                            "🔒 Download encrypted backup (.enc)", data=blob,
+                            file_name="labnotebook_backup.enc",
+                            mime="application/octet-stream")
+            st.markdown("**Plain JSON backup (re-importable)**")
+            st.download_button(
+                "Download JSON backup", data=labnotebook.entries_to_json(store, owner),
+                file_name="labnotebook_backup.json", mime="application/json")
+
+        st.markdown("---")
+        st.markdown("**Restore from a backup**")
+        up = st.file_uploader("Upload a .json or .enc backup",
+                              type=["json", "enc"], key="nb_restore")
+        if up is not None:
+            raw = up.read()
+            try:
+                restored = None
+                if up.name.endswith(".enc"):
+                    pw2 = st.text_input("Passphrase for this backup",
+                                        type="password", key="nb_pw_restore")
+                    if pw2:
+                        restored = labnotebook.decrypt_backup(raw, pw2)
+                    else:
+                        st.info("Enter the passphrase to decrypt.")
+                else:
+                    restored = labnotebook.load_json_backup(raw)
+                if restored is not None:
+                    mode = st.radio("Restore mode", ["Append", "Replace all"],
+                                    horizontal=True, key="nb_restore_mode")
+                    if st.button("Restore now"):
+                        if mode == "Replace all":
+                            st.session_state["lab_notebook"] = list(restored)
+                        else:
+                            store.extend(restored)
+                        st.success(f"Restored {len(restored)} entries.")
+                        st.rerun()
+            except Exception as ex:
+                st.error(f"Could not read backup: {str(ex)[:160]}")
+
+
 def main():
     render_header()
     st.markdown(
@@ -3135,13 +3472,24 @@ def main():
         '</div>',
         unsafe_allow_html=True,
     )
+    st.markdown(
+        '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;'
+        'padding:8px 14px;margin:0 0 12px;font-size:0.82rem;color:#1e3a8a;">'
+        '📱 <b>Works on phone, tablet and PC</b> — open this same link in any '
+        'browser. To get an app icon: <b>Android/Chrome</b> menu ⋮ → '
+        '<i>Install app / Add to Home screen</i>; <b>iPhone/iPad Safari</b> Share → '
+        '<i>Add to Home Screen</i>; <b>Windows/Mac</b> the install icon in the '
+        'address bar (or menu → <i>Install / Create shortcut</i>). No app store needed.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     render_sidebar_chat()
 
-    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_cite, tab5 = st.tabs([
+    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_cite, tab5, tab_nb = st.tabs([
         "Chat with Papers", T["tab1"], T["tab2"], "Docking Validation",
         T["tab3"], T["tab4"],
         "4PL IC50 Fit", "Citations",
-        "AI Chat Assistant",
+        "AI Chat Assistant", "Lab Notebook",
     ])
 
     with tab_pdfchat:
@@ -3165,6 +3513,8 @@ def main():
         tab_citations()
     with tab5:
         tab_chat_assistant()
+    with tab_nb:
+        tab_lab_notebook()
 
 
 if __name__ == "__main__":
