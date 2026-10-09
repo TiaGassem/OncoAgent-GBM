@@ -63,6 +63,20 @@ except Exception:
     redock_rmsd = None
     RMSDResult = None
 
+try:
+    from assistant_llm import polish_answer
+    HAS_LLM_POLISH = True
+except Exception:
+    HAS_LLM_POLISH = False
+    polish_answer = None
+
+try:
+    from protocols import PROTOCOL_LIBRARY, list_protocols, get_protocol
+    HAS_PROTOCOLS = True
+except Exception:
+    HAS_PROTOCOLS = False
+    PROTOCOL_LIBRARY = {}
+
 st.set_page_config(
     page_title="OncoAgent-GBM",
     page_icon=None,
@@ -2453,7 +2467,38 @@ def _chat_answer(question: str) -> str:
         lines.append(f"\n**Sources:** {src}")
     if r["matched"]:
         lines.append(f"\n*Credibility {r['score']}/100 \u00b7 research-only*")
-    return "\n".join(lines)
+    grounded = "\n".join(lines)
+    return _maybe_polish(question, grounded)
+
+
+def _maybe_polish(question: str, grounded_markdown: str) -> str:
+    """Optional fluent rewrite using the user's OWN LLM key (session only).
+
+    Grounded cited-only is the DEFAULT. If the user enabled 'Grounded + my LLM
+    key' and supplied a key, the LLM may ONLY rephrase the already-cited draft,
+    it must not add facts or citations (enforced by the system prompt inside
+    assistant_llm.polish_answer). On ANY failure it returns the grounded draft
+    unchanged, so the app never fabricates and never crashes.
+    """
+    cfg = st.session_state.get("llm_cfg") or {}
+    if not (HAS_LLM_POLISH and cfg.get("enabled") and cfg.get("api_key")):
+        return grounded_markdown
+    try:
+        res = polish_answer(
+            question=question,
+            grounded_markdown=grounded_markdown,
+            provider=cfg.get("provider", "openai"),
+            api_key=cfg.get("api_key", ""),
+            model=cfg.get("model", ""),
+        )
+    except Exception as e:
+        return grounded_markdown + f"\n\n*(Fluent mode skipped: {str(e)[:120]} - showing grounded answer.)*"
+    if res.get("used_llm") and res.get("text"):
+        return (res["text"]
+                + "\n\n*Fluent rewrite via your own LLM key, grounded in the "
+                  "cited sources above. Verify every PMID/DOI yourself.*")
+    note = res.get("error") or "LLM unavailable"
+    return grounded_markdown + f"\n\n*(Fluent mode skipped: {note[:120]} - showing grounded answer.)*"
 
 
 def _render_chat_struct(r: dict):
@@ -2496,6 +2541,104 @@ def _new_conversation() -> str:
     st.session_state["conversations"][cid] = {"title": "New chat", "turns": []}
     st.session_state["active_conv"] = cid
     return cid
+
+
+def _render_answer_mode():
+    """Let the user CHOOSE the answer style. Default = Grounded, cited-only.
+
+    Option 2 (Grounded + my own LLM key) only RE-WRITES the already-cited draft
+    for fluency; it never adds facts or citations. The key lives in session_state
+    only (never written to disk, never logged, never hardcoded).
+    """
+    cfg = st.session_state.setdefault(
+        "llm_cfg",
+        {"enabled": False, "provider": "openai", "api_key": "", "model": ""},
+    )
+    with st.expander("Answer mode", expanded=False):
+        choice = st.radio(
+            "How should answers be written?",
+            ["Grounded (cited-only) — default, no external AI",
+             "Grounded + my own LLM key (fluent rewrite only)"],
+            index=1 if cfg.get("enabled") else 0,
+            key="answer_mode_radio",
+        )
+        cfg["enabled"] = choice.startswith("Grounded + my own")
+        if cfg["enabled"]:
+            if not HAS_LLM_POLISH:
+                st.warning("LLM polish module not available in this build; "
+                           "answers stay grounded cited-only.")
+            st.caption(
+                "The AI only rephrases the cited draft for readability. It must "
+                "NOT add facts or citations. Your key is kept in this session "
+                "only, never saved or logged. Research use only — not clinical.")
+            c1, c2 = st.columns(2)
+            with c1:
+                cfg["provider"] = st.selectbox(
+                    "Provider", ["openai", "anthropic"],
+                    index=0 if cfg.get("provider", "openai") == "openai" else 1,
+                    key="llm_provider")
+            with c2:
+                suggest = ("gpt-4o-mini / gpt-4o" if cfg["provider"] == "openai"
+                           else "claude-3-5-sonnet / claude-3-5-haiku")
+                cfg["model"] = st.text_input(
+                    "Model (optional)", value=cfg.get("model", ""),
+                    placeholder=f"suggestions: {suggest}", key="llm_model")
+            cfg["api_key"] = st.text_input(
+                "Your API key", value=cfg.get("api_key", ""), type="password",
+                placeholder="sk-... (kept in session only)", key="llm_key")
+            if not cfg["api_key"]:
+                st.info("No key entered — answers stay grounded cited-only.")
+
+
+def _render_protocol_library():
+    """Open-access lab-protocol library. Numeric params are VERIFY placeholders;
+    references are real open-access methods papers. Optionally pulls live PMC
+    hits so the user grounds each step in a real source.
+    """
+    if not HAS_PROTOCOLS:
+        return
+    with st.expander("Lab protocol library (open-access, research-use)", expanded=False):
+        st.caption("Standard assay templates. Numeric values marked [VERIFY] are "
+                   "placeholders — confirm against the cited open-access method "
+                   "before use. No clinical use.")
+        names = list_protocols()
+        if not names:
+            st.info("No protocols available.")
+            return
+        pick = st.selectbox("Protocol", names, key="protocol_pick")
+        p = get_protocol(pick)
+        if not p:
+            return
+        st.markdown(f"**{p.get('title', pick)}**")
+        if p.get("summary"):
+            st.caption(p["summary"])
+        steps = p.get("steps", [])
+        if steps:
+            st.markdown("**Steps**")
+            for i, s in enumerate(steps, 1):
+                st.markdown(f"{i}. {s}")
+        refs = p.get("oa_refs", [])
+        if refs:
+            st.markdown("**References (open-access — verify PMID/DOI)**")
+            for r in refs:
+                st.markdown(f"- {r}")
+        q = p.get("pmc_query")
+        if q and st.button("Find live open-access sources (PMC)",
+                           key=f"pmc_{pick}"):
+            with st.spinner("Querying PubMed/PMC..."):
+                try:
+                    hits = search_pubmed(q, max_results=5)
+                except Exception as e:
+                    hits = []
+                    st.warning(f"Live lookup failed: {str(e)[:120]}")
+                if hits:
+                    for h in hits:
+                        try:
+                            st.markdown("- " + format_citation_apa(h))
+                        except Exception:
+                            st.markdown(f"- {h}")
+                else:
+                    st.info("No live hits returned — use the fixed references above.")
 
 
 def tab_chat_assistant():
@@ -2550,6 +2693,9 @@ def tab_chat_assistant():
         if active not in convs:
             active = _new_conversation()
         conv = convs[active]
+
+        _render_answer_mode()
+        _render_protocol_library()
 
         # Quick-topic chips
         chip_prompts = {
