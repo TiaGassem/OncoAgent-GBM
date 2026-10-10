@@ -1,6 +1,6 @@
 # OncoAgent-GBM
 
-**An open-source, computational drug-discovery toolkit for glioblastoma (GBM) research.**
+**An open-source research and education toolkit for glioblastoma (GBM) and neuro-oncology drug discovery.**
 
 OncoAgent-GBM is a Streamlit web application that integrates structure-based
 docking, cheminformatics, pharmacokinetic prediction and literature tooling into
@@ -28,6 +28,8 @@ phosphatase family (CDC25A/B/C) as therapeutic targets in glioblastoma.
 | **Literature** | PubMed search + APA/BibTeX citations | NCBI E-utilities |
 | **PDF Chat** | Extractive Q&A over uploaded papers | passage retrieval (quotes only) |
 | **AI Chat Assistant** | Source-cited GBM Q&A, with optional bring-your-own-key fluent mode | grounded retrieval + optional user LLM (rephrase only) |
+| **Live Data Explorer** | cBioPortal cohort mutation fractions, ChEMBL drug/mechanism lookup, ClinicalTrials.gov *registry listing* (no eligibility matching), Europe PMC search, cell-line link-outs (Cellosaurus/DepMap) | live REST APIs; each result shows source, retrieval time, licence note |
+| **Run cards** | JSON record of inputs, parameters, versions, timestamp for docking and lookups | `runcard.py` |
 | **Lab protocol library** | 16 open-access GBM/oncology assay templates (spheroid, viability/MTT, scratch, clonogenic, Western blot, qRT-PCR, flow cytometry cell-cycle & apoptosis, caspase-3/7, IF/ICC, transwell, comet, EdU/BrdU, docking+MD, in-silico ADMET) | templates with `[verify]` placeholders + live PubMed/PMC lookup |
 | **My Lab Notebook** | Write your own notes/protocols, keep them private to your session, export to Word/PDF/Markdown, encrypted backup | python-docx + fpdf2 + Fernet (AES) |
 
@@ -41,6 +43,12 @@ passphrase is never seen or stored; lose it and the backup is unrecoverable.
 It is a responsive web app: open the link on any device. To get an app-like icon,
 "Add to Home Screen" (iOS Safari / Android Chrome) or "Install this site as an app"
 (Chrome/Edge on Windows/Mac). No app store, research use only.
+
+## What's new in 2.0 (see CHANGELOG.md and AUDIT.md)
+Hard-coded clinical-trial matching, patient samples, cell-line IC50/mutation tables and 27 incorrect drug
+structures were removed. Facts are now fetched live with provenance, structures are formula-verified by tests,
+and a *Limitations & Honesty* tab is included. Live API adapters still need a smoke test on a networked machine:
+`python -m data_sources`.
 
 ## Scientific integrity principles
 
@@ -75,8 +83,8 @@ It is a responsive web app: open the link on any device. To get an app-like icon
 
 ## Deployment
 
-Deployed on Streamlit Community Cloud **from this GitHub repository** (not from a
-zip). For real docking the repo must contain a `packages.txt` with exactly:
+Deploy on Streamlit Community Cloud **from the GitHub repository** (upload ALL files, keeping the
+`.streamlit/` folder). Vina and OpenBabel are system packages; `packages.txt` must contain exactly:
 
 ```
 autodock-vina
@@ -89,6 +97,9 @@ Python dependencies are in `requirements.txt` (RDKit, SciPy, Meeko, py3Dmol, …
 # local run
 pip install -r requirements.txt
 streamlit run app.py
+
+# tests
+pip install -r requirements-dev.txt && pytest
 ```
 
 ## How to validate the docking before you report any number

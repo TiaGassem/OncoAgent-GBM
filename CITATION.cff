@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it. Verify the DOI after your first Zenodo release."
+title: "OncoAgent-GBM: an open research and education toolkit for glioblastoma and neuro-oncology drug discovery"
+version: 2.0.0
+date-released: 2026-10-10
+license: MIT
+repository-code: "https://github.com/TiaGassem/OncoAgent-GBM"
+authors:
+  - family-names: Gassem
+    given-names: Tasnim
+    # orcid: "https://orcid.org/XXXX-XXXX-XXXX-XXXX"   # add yours
+# doi: 10.5281/zenodo.XXXXXXX   # add after connecting the repo to Zenodo and publishing a release
+keywords: [glioblastoma, neuro-oncology, docking, cheminformatics, open science]

@@ -1,4 +1,6 @@
-"""OncoAgent-GBM: Glioblastoma Drug Discovery Platform -- Clinical Research Dashboard."""
+"""OncoAgent-GBM: open research and education toolkit for glioblastoma / neuro-oncology drug discovery.
+
+Research and education only. Not a medical device."""
 
 from __future__ import annotations
 
@@ -10,6 +12,8 @@ import tempfile
 from datetime import datetime
 
 import streamlit as st
+from reference_compounds import GBM_REFERENCE_SMILES
+from explorer_tab import tab_data_explorer, tab_limitations
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,7 +48,7 @@ from anonymizer import (
 )
 from agent_evaluator import (
     evaluate_lead, generate_pdf_report, generate_docx_report,
-    PatientProfile, estimate_toxicity, ToxicityProfile, LeadEvaluation,
+    estimate_toxicity, ToxicityProfile, LeadEvaluation,
     SOURCE_LINKS, RESEARCH_USE_DISCLAIMER,
 )
 try:
@@ -95,11 +99,11 @@ st.set_page_config(
 LANG = {
     "en": {
         "app_title": "OncoAgent-GBM",
-        "app_subtitle": "Glioblastoma Multiforme Drug Discovery and Clinical Decision Support Platform",
+        "app_subtitle": "Open research & education toolkit for glioblastoma and neuro-oncology drug discovery",
         "tab1": "Compound Screening",
         "tab2": "Molecular Docking",
         "tab3": "Literature & Bibliography",
-        "tab4": "Patient Data & Trial Matching",
+        "tab4": "Live Data Explorer",
         "execute": "Execute Screening",
         "export_csv": "Export CSV",
         "export_pdf": "Export PDF Report",
@@ -109,11 +113,11 @@ LANG = {
     },
     "fr": {
         "app_title": "OncoAgent-GBM",
-        "app_subtitle": "Plateforme de decouverte de médicaments et d'aide a la decision clinique pour le glioblastome",
+        "app_subtitle": "Boîte à outils ouverte de recherche et d'enseignement pour la découverte de médicaments en neuro-oncologie",
         "tab1": "Depistage de composés",
         "tab2": "Docking moléculaire",
         "tab3": "Littérature et bibliographie",
-        "tab4": "Données patient et essais cliniques",
+        "tab4": "Explorateur de données publiques",
         "execute": "Lancer le depistage",
         "export_csv": "Exporter CSV",
         "export_pdf": "Exporter rapport PDF",
@@ -123,11 +127,11 @@ LANG = {
     },
     "ar": {
         "app_title": "OncoAgent-GBM",
-        "app_subtitle": "منصة اكتشاف ادوية الورم النجمي الشبكي المتعدد ودعم القرارات السريرية",
+        "app_subtitle": "مجموعة أدوات مفتوحة للبحث والتعليم في اكتشاف أدوية الأورام العصبية",
         "tab1": "فحص المركبات",
         "tab2": "الترابط الجزيئي",
         "tab3": "الأدبيات والمراجع",
-        "tab4": "بيانات المرضى والتجارب السريرية",
+        "tab4": "مستكشف البيانات العامة",
         "execute": "بدء الفحص",
         "export_csv": "تصدير CSV",
         "export_pdf": "تصدير تقرير PDF",
@@ -193,14 +197,14 @@ NOT_MEDICAL_ADVICE = (
 )
 
 AGENT_MASTER_PROMPT = """# ROLE
-You are OncoAgent-GBM - a clinically credible, academically rigorous AI agent specialized in glioblastoma (GBM) research, drug discovery, and translational oncology.
+You are OncoAgent-GBM - a transparent, research-and-education-only assistant for glioblastoma (GBM) and neuro-oncology drug-discovery research. You are not a medical device.
 
 # MISSION
-Deliver academically validated, clinically reliable insights by integrating molecular docking, ADME/Tox prediction, genomics/transcriptomics, clinical-trial mapping, patient-safety insights, literature synthesis, and simulation workflows.
+Help researchers and students use docking, ADME/Tox heuristics, public-database lookups and literature search, with every output labelled by source and limitation.
 
 # CORE PRINCIPLES
 1. Academic Integrity: base all outputs on peer-reviewed literature and public databases (PubMed, ClinicalTrials.gov, UniProt, PubChem, SwissADME, GEPIA, R2 Genomics).
-2. Clinical Reliability: follow biomedical ethics; never provide medical advice - research insights only.
+2. No clinical use: never give diagnosis, prognosis, treatment or trial-eligibility advice for any individual - population-level research information only.
 3. Transparency: cite sources; if evidence is missing, state "No validated data available."
 4. Reproducibility: all workflows (docking, ADME, toxicity, genomics) are documented and reproducible.
 5. Explainability: include reasoning, validation metrics, and biological interpretation.
@@ -216,7 +220,7 @@ Deliver academically validated, clinically reliable insights by integrating mole
 - End every reply with the disclaimer and source links.
 
 # NOTE ON SCOPE (honest)
-Fully wired: docking (per-user AutoDock Vina + fpocket blind docking, SwissDock/CB-Dock2 refs), rule-based toxicity pre-screen (PubChem alerts, NOT ProTox-3), compound screening, cell lines, trial context, PubMed literature.
+Fully wired: docking (per-user AutoDock Vina), rule-based toxicity pre-screen (NOT ProTox-3), compound screening, live lookups (cBioPortal, ChEMBL, ClinicalTrials.gov registry, Europe PMC), PubMed literature.
 Declared but NOT yet implemented as live modules: GEPIA/R2 genomics, UniProt, SwissADME API, EudraCT, ProTox-3 ML. Do not claim their outputs as real until wired.
 """
 
@@ -227,9 +231,8 @@ with st.sidebar:
         "- Compound Screening\n"
         "- Molecular Docking\n"
         "- Literature Research\n"
-        "- Cell Line Database\n"
-        "- Clinical Trial Matching\n"
-        "- Treatment Planning (research-only)\n"
+        "- Live Data Explorer (public sources)\n"
+        "- Limitations & Honesty\n"
         "- AI Chat Assistant (source-cited)\n"
         "- Chat with PDF / Library (extractive, verbatim + page numbers)"
     )
@@ -415,57 +418,7 @@ hr {
 </style>
 """, unsafe_allow_html=True)
 
-GBM_DRUGS = {
-    "[NSC-8583] Temozolomide (TMZ)": "CN1N=NC2=C(N=CN2C1=O)C(N)=O",
-    "[NSC-79037] Lomustine (CCNU)": "ClCCN(N=O)C(=O)NC1CCCCC1",
-    "[NSC-409962] Carmustine (BCNU)": "ClCCN(C(=O)N(CCCl)C(=O)N)N=O",
-    "[NSC-118233] Procarbazine": "CC(C)NC(=O)C1=CC=CC=C1NN",
-    "[NSC-67574] Vincristine": "CO[C@H]1C[C@H](C2=C1C(=O)OC3=C2C(=O)C4=C3OCO4)N(C)C[C@@H]5OC(=O)[C@@]6(C7=C5C=CC(=C7)OC)C(=O)OC6C",
-    "[NSC-123127] Dacarbazine": "CN(C)/N=N/c1ncc[nH]c1=O",
-    "[NSC-359078] Nimustine (ACNU)": "O=C(NCCCl)N(N=O)C1CCCCC1",
-    "[NSC-172112] Etoposide": "COC1=CC(=CC(=C1O)[C@@H]2C3=C(C=CC(=C3)OCO2)C4=C5[C@@H]([C@@H](OC5=O)C6=CC=C(C=C6)OC)OC(=O)[C@@H]4O)OC",
-    "[NSC-249992] Irinotecan": "C1CCC2=C1C3=CC=C4C(=C3C(=O)N2CC5=CC=C(C=C5)OC(=O)NC6CCN(C)CC6)OCO4",
-    "[NSC-141540] Topotecan": "O=C1C2=C(OCO2)C(=O)c2cc(O)ccc21",
-    "[NSC-718781] Erlotinib (EGFR TKI)": "COC1=CC2=C(C=CN=C2C=C1OCCOC)NC3=CC=CC=C3",
-    "[NSC-641538] Gefitinib (EGFR TKI)": "COC1=C(C=C2C(=C1)N=CN=C2NC3=CC(=C(C=C3)F)Cl)OCCCN4CCOCC4",
-    "[NSC-727957] Sunitinib (VEGFR/PDGFR)": "CCN(CC)CCNC(=O)C1=C(C(=C(/C1=C\\2/C3=C(C=CC=C3)NC2=O)C)C)C",
-    "[NSC-737664] Lapatinib (EGFR/HER2)": "CS(=O)CCNCC1=CC=C(O1)C2=CC3=C(C=C2)N=CN=C3NC4=CC(=C(C=C4)Cl)Cl",
-    "[NSC-654649] Sorafenib (multi-kinase)": "CNC(=O)C1=CC=CC=C1OC2=C(N=CC=C2)NC(=O)NC3=CC(=C(C=C3)Cl)C(F)(F)F",
-    "[NSC-747854] Pazopanib (VEGFR)": "CC1=CC(=CC=C1)NC2=NC=CC=C2NC(=O)CN3CCN(C)CC3",
-    "[NSC-737664] Dasatinib (Src/ABL)": "CC1=NC(=CC(=N1)NC2=CC(=CC=C2)C(=O)NC3=CC=C(C=C3)OC4=CC=CC=C4C(F)(F)F)NC5=CC=CC=C5",
-    "[NSC-718781] Vandetanib (VEGFR/EGFR)": "COc1ccc2ncnc(Nc3ccc(Br)cc3)c2c1",
-    "[NSC-757487] Bosutinib (SRC inhibitor)": "COC1=C(C=CC(=C1Cl)NC2=NC=CC(=N2)C3=CC(=CC=C3)OC4=CC=CC=C4)OC",
-    "[NSC-725741] Axitinib (VEGFR)": "CS(=O)CCNC(=O)C1=CC=C(C=C1)NC2=NC3=C(C=CC=C3)C(=N2)C4=CC=C(C=C4)C",
-    "[NSC-747175] ENMD-2076 (Aurora/FGFR)": "COC1=CC=C(C=C1)NC2=NC=NC3=C2C=CC=C3NC(=O)NC4=CC=CC=C4C(F)(F)F",
-    "[NSC-95382] PTP1B inhibitor": "CC(=O)NC1=CC=C(C=C1)S(=O)(=O)NC(=O)NC2=CC=CC=C2",
-    "[NSC-663248] SHP-2 inhibitor (SHP099)": "CC1=CC=C(C=C1)S(=O)(=O)NC2=NC3=C(C=CC=C3)C(=N2)OC",
-    "[NSC-104890] Staurosporine (PKC inhibitor)": "CC1=CC2=C(C=C1C)NC3=C2C(=O)NC4=CC=CC=C43",
-    "[NSC-139407] AG1478 (EGFR inhibitor)": "CC1=CC(=CC=C1)NC2=NC=NC3=C2C=CC=C3NC4=CC=C(C=C4)Br",
-    "[NSC-164536] Bortezomib (proteasome)": "CC(C1=CC=C(C=C1)NC(=O)C2=CC=CC=C2)NC(=O)C(CCC(=O)O)NC(=O)C(CC3=CC=C(C=C3)O)NC(=O)C(CC4=CC=C(C=C4)N)NC(=O)C(CC5=CC=CC=C5)NC(=O)C(CC6=CC=C(C=C6)O)NC(=O)C(C(C)O)NC(=O)C(CC7=CC=CC=C7)NC(=O)C(CC8=CC=C(C=C8)O)NC(=O)C(CC9=CC=C(C=C9)O)",
-    "[NSC-271603] ABT-888 (PARP inhibitor)": "C1CC1C(=O)NC2=CC=C(C=C2)C3=NN4C(=N3)C=CC=N4",
-    "[NSC-613327] Curcumin": "COc1cc(/C=C/C(=O)CC(=O)/C=C/c2ccc(O)c(OC)c2)ccc1O",
-    "[NSC-152002] Thalidomide": "O=C1C(=O)N(c2ccccc2)C(=O)N1C1CCCCC1",
-    "[NS-733438] Rapamycin (Sirolimus)": "CCC1=C[C@H]([C@H](O)[C@H](C)C=CC=C[C@@H](O)[C@H](C)C[C@H](O))OC(=O)[C@H](O)[C@H](C)C=CC=C[C@@H](O)[C@H](C)C[C@H](O)CC(=O)O[C@@H]1C",
-    "[NSC-727957] Temsirolimus": "CC(C)[C@@H](O)C=C[C@@H](O)[C@H](C)OC(=O)C=C[C@@H]1OC(=O)C[C@@H](O)C[C@@H](C)[C@@H](O)C=C[C@@H](O)[C@H](C)OC(=O)C=CC1=O",
-    "[NSC-730868] Everolimus": "CCC(=O)OC1CC(CCC1C)OC2CC(OC(C2)C3CC(C(=O)O3)O)OC4CC(OC(C4)C5CC(C(=O)O5)O)OC",
-    "[NSC-747954] BEZ235/Dactolisib": "O=C1NC2=C(N1)C=CC(=C2)C3=NC4=CC=CC=C4N3C5=CC=CC=C5",
-    "[NSC-675423] Vorinostat (SAHA)": "O=C(/C=C/C1=CC=CC=C1)NCCCCCCCC(=O)NO",
-    "[NSC-687582] Romidepsin": "OC1=CC(OC(=O)C(CCC2=CC=CC=C2)NC(=O)C3=CC=CC=C3)C4=C1C(=O)NCCCC4",
-    "[NSC-724017] Belinostat": "ONS(=O)(=O)C1=CC=C(C=C1)NC(=O)OC2=CC=CC=C2",
-    "[NSC-277097] O6-Benzylguanine (MGMT inhibitor)": "Nc1nc2ncn(Cc3ccccc3)c2c(=O)[nH]1",
-    "[NSC-42066] O6-Methylguanine": "O=c1nc(N)nc2ncn(C)n12",
-    "[NSC-8806] Busulfan": "CS(=O)(=O)OCCCOS(=O)(=O)C",
-    "[NSC-342790] Bendamustine": "C1C2CN(C1C(=O)N=C(N2)N)C3=CC=C(C=C3)C(=O)NCCl",
-    "[NSC-724958] Chlorambucil": "C1=CC=C(C=C1)CCC(=O)CCl",
-    "[NSC-714537] NEO-212 (TMZ-POH)": "CCC(=O)NC1=CC=CC(=C1)CC2=CC=C(C=C2)NC(=O)C3=NN=C4C(=O)N(C)C(=N4)N3C",
-    # === CDC25 / DUAL-SPECIFICITY PHOSPHATASE INHIBITORS (U251/U87 GBM) ===
-    "[NSC-95397] Cdc25/MKP inhibitor": "OCCSC1=C(SCCO)C(=O)C2=CC=CC=C2C1=O",
-    "[NSC-663284] Cdc25 inhibitor (reference)": "O=C1C=CC(=O)C(Nc2ccc(N(CCOCc3ccccc3)C(=O)c3ccccc3)cc2)=C1",
-    "[NSC-668394] Naphthoquinone Cdc25 inhibitor": "NC1=C(N)C(=O)c2ccccc2C1=O",
-    "[Monohydroxy-NSC95397] M-NSC (Cdc25A)": "OCCSC1=C(SCCO)C(=O)c2cc(O)ccc21",
-    "[Dihydroxy-NSC95397] D-NSC (most potent Cdc25)": "OCCSC1=C(SCCO)C(=O)c2c(O)ccc(O)c21",
-    "[Cpd5] Naphthoquinone (Cdc25 ligand)": "O=C1C=CC(=O)C(c2ccccc2)=C1",
-}
+GBM_DRUGS = dict(GBM_REFERENCE_SMILES)  # formula-verified in tests; see reference_compounds.py
 
 
 def render_header():
@@ -483,11 +436,11 @@ def render_header():
         '<p style="color:#bfdbfe;margin:0.6rem 0 0 0;font-size:0.72rem;font-weight:300;'
         'letter-spacing:0.01em;">'
         'Compound Screening | Molecular Docking | Literature Research | '
-        'Cell Line Database | Clinical Trial Matching | Treatment Planning</p>'
+        'Live Data Explorer | Limitations & Honesty</p>'
         '</div>'
         '<div style="text-align:right;">'
         '<p style="color:#93c5fd;margin:0;font-size:0.65rem;font-weight:400;'
-        'letter-spacing:0.02em;">Version 1.0</p>'
+        'letter-spacing:0.02em;">Version 2.0</p>'
         '<p style="color:#93c5fd;margin:0.15rem 0 0 0;font-size:0.65rem;font-weight:400;">'
         'For Research Use Only</p>'
         '</div>'
@@ -1145,6 +1098,15 @@ def tab_docking():
                 "timestamp_utc": result.timestamp,
                 "command": result.command,
             })
+            from runcard import build_runcard, to_json
+            _rc = build_runcard("docking", inputs={"command": result.command},
+                                parameters={"seed": result.seed, "exhaustiveness": result.exhaustiveness},
+                                results_summary={"vina_version": result.vina_version or "unknown",
+                                                 "timestamp_utc": result.timestamp},
+                                app_version="2.0.0")
+            st.download_button("Download run card (JSON)", to_json(_rc),
+                               file_name="runcard_docking.json", mime="application/json",
+                               key="rc_docking")
             st.caption("Record these in your thesis methods. Same inputs + same "
                        "seed reproduce this result; a different seed probes "
                        "run-to-run variability. Report the mean \u00b1 SD over a few "
@@ -1444,789 +1406,7 @@ def tab_research():
                 st.info("Select at least one source (DOI lookup or PubMed result) and run a DOI lookup above to search.")
 
 
-# ============================================================
-# TAB 4: Brain Cancer Cell Lines & Clinical Trial Matching
-# ============================================================
-
-BRAIN_CANCER_CELL_LINES = {
-    "U251 MG": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, 67-year-old male",
-        "mutations": {"PTEN": "mutated (truncating)", "TP53": "wildtype", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, vimentin+, nestin+",
-        "karyotype": "Near-triploid, complex",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 25.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 15.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 12.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 5.2, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 3.8, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 18.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 8.5, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 12.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 15.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 10.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 20.0, "response": "Moderate"},
-        },
-    },
-    "U87 MG": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, 44-year-old female",
-        "mutations": {"PTEN": "deleted (homozygous)", "TP53": "wildtype", "IDH1": "wildtype", "EGFR": "amplified", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, vimentin+, MHC-I low",
-        "karyotype": "Near-triploid, +7, -10",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 18.0, "response": "Moderate"},
-            "Lomustine": {"ic50_um": 10.0, "response": "Sensitive"},
-            "Carmustine": {"ic50_um": 8.0, "response": "Sensitive"},
-            "NSC-95397": {"ic50_um": 4.8, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 3.2, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 25.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 7.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 4.5, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 10.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 12.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 6.5, "response": "Sensitive"},
-            "Curcumin": {"ic50_um": 18.0, "response": "Moderate"},
-        },
-    },
-    "U373 MG": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, grade 4 astrocytoma",
-        "mutations": {"PTEN": "mutated (point)", "TP53": "mutated (R273H)", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, S100B+",
-        "karyotype": "Hypertriploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 30.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 18.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 14.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 6.0, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.5, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 22.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 9.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.5, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 14.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 18.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 12.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 22.0, "response": "Moderate"},
-        },
-    },
-    "T98G": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, 61-year-old, recurrent GBM",
-        "mutations": {"PTEN": "mutated", "TP53": "mutated (G266V)", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated (but high MGMT activity)"},
-        "markers": "GFAP+, vimentin+, nestin+",
-        "karyotype": "Near-tetraploid, complex",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 45.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 20.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 15.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 7.0, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 5.0, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 30.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 10.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 6.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 16.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 20.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 15.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 25.0, "response": "Moderate"},
-        },
-    },
-    "A172": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, 55-year-old male",
-        "mutations": {"PTEN": "deleted", "TP53": "wildtype", "IDH1": "wildtype", "EGFR": "amplified", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, S100B+",
-        "karyotype": "Hyperdiploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 22.0, "response": "Moderate"},
-            "Lomustine": {"ic50_um": 12.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 10.0, "response": "Sensitive"},
-            "NSC-95397": {"ic50_um": 5.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.0, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 15.0, "response": "Moderate"},
-            "Sorafenib": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 4.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 11.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 14.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 9.0, "response": "Sensitive"},
-            "Curcumin": {"ic50_um": 18.0, "response": "Moderate"},
-        },
-    },
-    "LN229": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, right temporal lobe",
-        "mutations": {"PTEN": "mutated (homozygous deletion)", "TP53": "mutated (R175H)", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "methylated"},
-        "markers": "GFAP+, nestin+",
-        "karyotype": "Near-triploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Lomustine": {"ic50_um": 6.0, "response": "Sensitive"},
-            "Carmustine": {"ic50_um": 5.0, "response": "Sensitive"},
-            "NSC-95397": {"ic50_um": 4.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 3.0, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 20.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 7.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 3.5, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Rapamycin": {"ic50_um": 10.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Curcumin": {"ic50_um": 15.0, "response": "Moderate"},
-        },
-    },
-    "LN18": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, right temporal lobe",
-        "mutations": {"PTEN": "wildtype", "TP53": "mutated (R248W)", "IDH1": "wildtype", "EGFR": "amplified", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, vimentin+",
-        "karyotype": "Near-diploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 28.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 16.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 12.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 6.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.8, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 16.0, "response": "Moderate"},
-            "Sorafenib": {"ic50_um": 9.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 13.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 16.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 11.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 20.0, "response": "Moderate"},
-        },
-    },
-    "SF295": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, 41-year-old male",
-        "mutations": {"PTEN": "mutated", "TP53": "mutated", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "deleted", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, S100B+",
-        "karyotype": "Near-triploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 32.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 18.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 14.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 6.0, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.2, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 25.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 10.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.5, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 14.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 18.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 12.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 22.0, "response": "Moderate"},
-        },
-    },
-    "SNB19": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, grade 4 astrocytoma",
-        "mutations": {"PTEN": "mutated (homozygous deletion)", "TP53": "mutated", "IDH1": "wildtype", "EGFR": "amplified", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, vimentin+",
-        "karyotype": "Near-triploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 28.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 16.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 12.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 5.8, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.0, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 18.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 9.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 13.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 16.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 11.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 20.0, "response": "Moderate"},
-        },
-    },
-    "U118 MG": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, grade 4 glioblastoma",
-        "mutations": {"PTEN": "mutated", "TP53": "mutated (R273H)", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+",
-        "karyotype": "Near-diploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 35.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 20.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 16.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 7.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 5.5, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 28.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 11.0, "response": "Moderate"},
-            "Vorinostat": {"ic50_um": 6.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 15.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 20.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 14.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 24.0, "response": "Moderate"},
-        },
-    },
-    "U138 MG": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, grade 4 glioblastoma",
-        "mutations": {"PTEN": "deleted", "TP53": "mutated (Y220C)", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, S100B+",
-        "karyotype": "Near-triploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 32.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 18.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 14.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 6.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.8, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 26.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 10.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.5, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 14.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 18.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 13.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 22.0, "response": "Moderate"},
-        },
-    },
-    "H4": {
-        "tissue": "Neuroglioma (WHO grade 3-4)",
-        "origin": "Human, anaplastic astrocytoma",
-        "mutations": {"PTEN": "wildtype", "TP53": "mutated", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "wildtype", "MGMT": "methylated"},
-        "markers": "GFAP-, vimentin+",
-        "karyodyte": "Near-diploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 10.0, "response": "Sensitive"},
-            "Lomustine": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Carmustine": {"ic50_um": 6.0, "response": "Sensitive"},
-            "NSC-95397": {"ic50_um": 5.0, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 3.5, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 20.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 4.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 9.0, "response": "Sensitive"},
-            "Rapamycin": {"ic50_um": 12.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 10.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 16.0, "response": "Moderate"},
-        },
-    },
-    "D54": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, glioblastoma",
-        "mutations": {"PTEN": "mutated", "TP53": "wildtype", "IDH1": "wildtype", "EGFR": "amplified", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+",
-        "karyotype": "Near-triploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 24.0, "response": "Moderate"},
-            "Lomustine": {"ic50_um": 14.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 11.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 5.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 3.8, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 16.0, "response": "Moderate"},
-            "Sorafenib": {"ic50_um": 8.5, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 4.8, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 12.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 15.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 10.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 19.0, "response": "Moderate"},
-        },
-    },
-    "CASI-1": {
-        "tissue": "Glioblastoma (WHO grade 4)",
-        "origin": "Human, grade 4 astrocytoma",
-        "mutations": {"PTEN": "deleted", "TP53": "mutated", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "deleted", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "GFAP+, nestin+",
-        "karyotype": "Hypertriploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 30.0, "response": "Resistant"},
-            "Lomustine": {"ic50_um": 17.0, "response": "Moderate"},
-            "Carmustine": {"ic50_um": 13.0, "response": "Moderate"},
-            "NSC-95397": {"ic50_um": 6.2, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.5, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 24.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 9.5, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 5.2, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 13.5, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 17.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 12.5, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 21.0, "response": "Moderate"},
-        },
-    },
-    "GL261": {
-        "tissue": "Glioblastoma (murine syngeneic)",
-        "origin": "Mouse, C57BL/6, induced by MCNU",
-        "mutations": {"PTEN": "wildtype", "TP53": "wildtype", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "MHC-I+, immunocompetent model",
-        "karyotype": "Diploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 15.0, "response": "Moderate"},
-            "Lomustine": {"ic50_um": 10.0, "response": "Sensitive"},
-            "Carmustine": {"ic50_um": 8.0, "response": "Sensitive"},
-            "NSC-95397": {"ic50_um": 6.0, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.5, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 20.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 10.0, "response": "Moderate"},
-            "Vorinostat": {"ic50_um": 5.0, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 12.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 14.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 11.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 18.0, "response": "Moderate"},
-        },
-    },
-    "RCAS-PDGFBA": {
-        "tissue": "PDGFB-driven glioma (murine model)",
-        "origin": "Mouse, Nestin-TVA, RCAS/PDGF-B",
-        "mutations": {"PTEN": "deleted (conditional)", "TP53": "deleted (conditional)", "IDH1": "wildtype", "EGFR": "wildtype", "NF1": "wildtype", "BRAF": "wildtype", "CDKN2A": "deleted", "MGMT": "unmethylated"},
-        "markers": "PDGFRa+, nestin+, GFAP+",
-        "karyotype": "Diploid",
-        "sensitivity": {
-            "Temozolomide": {"ic50_um": 12.0, "response": "Moderate"},
-            "Lomustine": {"ic50_um": 8.0, "response": "Sensitive"},
-            "Carmustine": {"ic50_um": 6.0, "response": "Sensitive"},
-            "NSC-95397": {"ic50_um": 5.5, "response": "Sensitive"},
-            "NSC-663284": {"ic50_um": 4.0, "response": "Sensitive"},
-            "Erlotinib": {"ic50_um": 18.0, "response": "Resistant"},
-            "Sorafenib": {"ic50_um": 9.0, "response": "Sensitive"},
-            "Vorinostat": {"ic50_um": 4.5, "response": "Sensitive"},
-            "ABT-888": {"ic50_um": 10.0, "response": "Moderate"},
-            "Rapamycin": {"ic50_um": 12.0, "response": "Moderate"},
-            "Dasatinib": {"ic50_um": 10.0, "response": "Moderate"},
-            "Curcumin": {"ic50_um": 16.0, "response": "Moderate"},
-        },
-    },
-}
-
-GBM_MOLECULAR_SUBTYPES = {
-    "Classical": {
-        "markers": "EGFR amplified, CDK4 amplified, hub of PDGFRA",
-        "frequency": "~30% of GBM",
-        "prognosis": "Intermediate OS (13-15 months)",
-        "targetable": "EGFR inhibitors, CDK4/6 inhibitors, PDGFR inhibitors",
-        "response_tmz": "Variable (depends on MGMT)",
-    },
-    "Mesenchymal": {
-        "markers": "NF1 loss, CHI3L1 (YKL-40) high, TNFRSF1A, MET",
-        "frequency": "~30% of GBM",
-        "prognosis": "Poor OS (10-12 months)",
-        "targetable": "MET inhibitors, NF-kB pathway, TNF-alpha inhibitors",
-        "response_tmz": "Generally poor",
-    },
-    "Proneural": {
-        "markers": "IDH1/2 mutation, PDGFRA amplification, TP53 mutation, PI3KR1",
-        "frequency": "~25% of GBM (secondary GBM)",
-        "prognosis": "Better OS (15-18 months, IDH-mutant up to 24+ months)",
-        "targetable": "IDH inhibitors (ivosidenib), PDGFR inhibitors, PI3K/mTOR",
-        "response_tmz": "Good if MGMT methylated",
-    },
-    "Neural": {
-        "markers": "NEFL, GABRA1, SYNPR, SLC12A5 (neuronal markers)",
-        "frequency": "~15% of GBM",
-        "prognosis": "Intermediate",
-        "targetable": "Limited specific targets",
-        "response_tmz": "Variable",
-    },
-}
-
-CLINICAL_TRIALS = [
-    {"nct": "NCT04334967", "title": "TTFields + TMZ + Pembrolizumab for newly diagnosed GBM", "phase": "III", "status": "Recruiting", "required_mutations": ["MGMT methylated"], "excluded_mutations": [], "drug": "Pembrolizumab (anti-PD-1)", "eligibility": "Newly diagnosed GBM, MGMT methylated, KPS >= 70", "expected_outcome": "OS improvement over TMZ alone (HR 0.66)"},
-    {"nct": "NCT03152318", "title": "Rindopepimut (EGFRvIII vaccine) vs Adjuvant TMZ", "phase": "III", "status": "Completed", "required_mutations": ["EGFRvIII positive"], "excluded_mutations": [], "drug": "Rindopepimut (CDX-110)", "eligibility": "EGFRvIII-expressing GBM post-resection", "expected_outcome": "No significant OS benefit in Phase III"},
-    {"nct": "NCT03718782", "title": "Dabrafenib + Trametinib for BRAF V600E mutant glioma", "phase": "II", "status": "Active", "required_mutations": ["BRAF V600E"], "excluded_mutations": [], "drug": "Dabrafenib + Trametinib", "eligibility": "BRAF V600E-mutant low-grade or anaplastic glioma", "expected_outcome": "ORR 67% in BRAF V600E pediatric glioma"},
-    {"nct": "NCT02340156", "title": "Ivosidenib (IDH1 inhibitor) for IDH1-mutant gliomas", "phase": "I/II", "status": "Recruiting", "required_mutations": ["IDH1 R132H", "IDH1 mutant"], "excluded_mutations": [], "drug": "Ivosidenib (AG-120)", "eligibility": "IDH1-mutant grade 1-3 glioma or secondary GBM", "expected_outcome": "ORR 54.3%, median PFS 13.6 months"},
-    {"nct": "NCT03638167", "title": "Bevacizumab + Lomustine for recurrent GBM", "phase": "III", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "Bevacizumab + Lomustine", "eligibility": "Recurrent GBM after TMZ-based therapy, KPS >= 70", "expected_outcome": "PFS6 16% vs 9% (lomustine alone)"},
-    {"nct": "NCT02503969", "title": "Optune (TTFields) + TMZ for newly diagnosed GBM", "phase": "III", "status": "Completed", "required_mutations": ["MGMT methylated"], "excluded_mutations": [], "drug": "TTFields + TMZ", "eligibility": "Newly diagnosed supratentorial GBM, MGMT methylated", "expected_outcome": "OS 20.9 vs 16.0 months (Stupp protocol)"},
-    {"nct": "NCT02717962", "title": "Atezolizumab (anti-PD-L1) + TMZ for GBM", "phase": "II", "status": "Completed", "required_mutations": ["MGMT methylated"], "excluded_mutations": [], "drug": "Atezolizumab + TMZ", "eligibility": "Newly diagnosed GBM, MGMT methylated", "expected_outcome": "No OS benefit over TMZ alone"},
-    {"nct": "NCT03396612", "title": "Vorasidenib (IDH1/2 inhibitor) for grade 2 gliomas", "phase": "III", "status": "Active", "required_mutations": ["IDH1 mutant", "IDH2 mutant"], "excluded_mutations": [], "drug": "Vorasidenib (Voranigo)", "eligibility": "IDH-mutant grade 2 glioma, post-surgery", "expected_outcome": "PFS 27.7 vs 11.1 months (INDIGO trial)"},
-    {"nct": "NCT01903330", "title": "PARP inhibitor Olaparib + TMZ for recurrent GBM", "phase": "II", "status": "Completed", "required_mutations": ["MGMT methylated"], "excluded_mutations": [], "drug": "Olaparib + TMZ", "eligibility": "Recurrent GBM, MGMT methylated, KPS >= 60", "expected_outcome": "PFS6 15%, some activity in MGMT-methylated"},
-    {"nct": "NCT02866747", "title": "Reovirus (Pelareorep) for recurrent GBM", "phase": "I/II", "status": "Active", "required_mutations": [], "excluded_mutations": [], "drug": "Pelareorep", "eligibility": "Recurrent high-grade glioma, any molecular subtype", "expected_outcome": "Phase I safety established, Phase II ongoing"},
-    {"nct": "NCT04201157", "title": "Letermovir (CMV inhibitor) + standard therapy for GBM", "phase": "II", "status": "Recruiting", "required_mutations": [], "excluded_mutations": [], "drug": "Letermovir", "eligibility": "Newly diagnosed GBM, CMV seropositive", "expected_outcome": "CMV-driven tumor cell killing hypothesis"},
-    {"nct": "NCT01769405", "title": "Ribavirin for recurrent GBM (targeting PKR/eIF2a)", "phase": "II", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "Ribavirin", "eligibility": "Recurrent GBM, KPS >= 60", "expected_outcome": "Modest activity, well tolerated"},
-    {"nct": "NCT02529813", "title": "Toca 511 + flucytosine for recurrent high-grade glioma", "phase": "III", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "Toca 511 (vocimagene amiretrorepvec)", "eligibility": "Recurrent HGG, planned resection", "expected_outcome": "OS 13.5 vs 9.9 months (intent-to-treat)"},
-    {"nct": "NCT00027495", "title": "Trabectedin for recurrent GBM", "phase": "II", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "Trabectedin", "eligibility": "Recurrent GBM, prior TMZ", "expected_outcome": "Limited activity, heavily pretreated"},
-    {"nct": "NCT02193182", "title": "Poly-ICLC + radiation for newly diagnosed GBM", "phase": "II", "status": "Completed", "required_mutations": ["IDH1 mutant"], "excluded_mutations": [], "drug": "Poly-ICLC (TLR3 agonist)", "eligibility": "IDH1-mutant grade 3-4 glioma", "expected_outcome": "Median OS 19.2 months in IDH-mutant"},
-    {"nct": "NCT01954316", "title": "Enzastaurin (PKC inhibitor) for recurrent GBM", "phase": "III", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "Enzastaurin", "eligibility": "Recurrent GBM, prior TMZ + RT", "expected_outcome": "No OS benefit over lomustine"},
-    {"nct": "NCT02029573", "title": "Auranofin ( thioredoxin reductase inhibitor) for GBM", "phase": "I/II", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "Auranofin", "eligibility": "Recurrent GBM, KPS >= 50", "expected_outcome": "Phase I complete, some responses"},
-    {"nct": "NCT03224104", "title": "CAB疗法 (Cabozantinib) for recurrent GBM", "phase": "II", "status": "Active", "required_mutations": [], "excluded_mutations": [], "drug": "Cabozantinib (multi-kinase)", "eligibility": "Recurrent GBM, first recurrence", "expected_outcome": "Phase II evaluating activity"},
-    {"nct": "NCT03483978", "title": "MAPK pathway inhibitor for BRAF V600E glioma", "phase": "II", "status": "Active", "required_mutations": ["BRAF V600E"], "excluded_mutations": [], "drug": "Dabrafenib + Trametinib", "eligibility": "BRAF V600E mutant glioma, any grade", "expected_outcome": "High response rates in BRAF V600E tumors"},
-    {"nct": "NCT03131941", "title": "Peptide vaccine for WT1-expressing gliomas", "phase": "I/II", "status": "Completed", "required_mutations": [], "excluded_mutations": [], "drug": "WT1 peptide vaccine", "eligibility": "WT1-positive glioma, HLA-A2.1+", "expected_outcome": "WT1 overexpression in >80% GBM"},
-]
-
-
-def _match_trial(patient_profile, trial):
-    score = 0
-    reasons = []
-    warnings = []
-
-    required = trial.get("required_mutations", [])
-    excluded = trial.get("excluded_mutations", [])
-
-    for mut in required:
-        matched = False
-        if mut == "MGMT methylated" and patient_profile.get("mgmt_methylated"):
-            matched = True
-        elif mut in ("IDH1 R132H", "IDH1 mutant", "IDH1/2 mutant") and patient_profile.get("idh_mutant"):
-            matched = True
-        elif mut == "EGFRvIII positive" and patient_profile.get("egfrviii_positive"):
-            matched = True
-        elif mut == "BRAF V600E" and patient_profile.get("braf_v600e"):
-            matched = True
-
-        if matched:
-            score += 30
-            reasons.append(f"Required mutation {mut} -- MATCHED")
-        else:
-            score -= 40
-            warnings.append(f"Required mutation {mut} -- NOT DETECTED")
-
-    for mut in excluded:
-        if mut == "MGMT methylated" and patient_profile.get("mgmt_methylated"):
-            score -= 50
-            warnings.append(f"Exclusion criterion: {mut}")
-        elif mut in ("IDH1 R132H", "IDH1 mutant") and patient_profile.get("idh_mutant"):
-            score -= 50
-            warnings.append(f"Exclusion criterion: {mut}")
-
-    grade = patient_profile.get("who_grade", 4)
-    if grade == 4:
-        score += 5
-        reasons.append("WHO grade 4 (GBM) -- eligible")
-    elif grade < 4:
-        score += 10
-        reasons.append(f"WHO grade {grade} -- eligible for low-grade glioma trials")
-
-    age = patient_profile.get("age_range", "45-60")
-    if age in ["18-30", "30-45", "45-60"]:
-        score += 5
-        reasons.append(f"Age {age} -- within eligible range")
-    elif age == "60-75":
-        score += 2
-        reasons.append(f"Age {age} -- may be eligible with KPS >= 70")
-    elif age == "75+":
-        score -= 10
-        warnings.append(f"Age {age} -- may be excluded from some trials")
-
-    nci_priority = ["NCT04334967", "NCT03396612", "NCT02340156", "NCT03718782", "NCT02503969"]
-    if trial.get("nct") in nci_priority:
-        score += 10
-        reasons.append("NCI-priority trial")
-
-    phase = trial.get("phase", "")
-    if "III" in phase:
-        score += 5
-        reasons.append("Phase III -- higher level of evidence")
-    elif "II" in phase:
-        score += 3
-    elif "I" in phase:
-        score += 1
-
-    status = trial.get("status", "")
-    if status == "Recruiting":
-        score += 10
-        reasons.append("Currently recruiting")
-    elif status == "Active":
-        score += 5
-        reasons.append("Active, not yet recruiting")
-
-    prior = patient_profile.get("prior_treatments", [])
-    if "Clinical Trial" in prior:
-        score += 3
-        reasons.append("Prior trial enrollment -- eligible for subsequent trials")
-
-    return {"score": max(0, min(100, score)), "reasons": reasons, "warnings": warnings}
-
-
-def _validate_patient_profile(profile):
-    issues = []
-    if not profile.get("patient_id"):
-        issues.append("Patient ID is required")
-    if not profile.get("mgmt_methylated") and profile.get("mgmt_methylated") is None:
-        issues.append("MGMT methylation status is missing -- critical for TMZ response prediction")
-    if not profile.get("idh_mutant") and profile.get("idh_mutant") is None:
-        issues.append("IDH1/2 mutation status is missing -- important for subtype classification")
-    if not profile.get("egfr_amplified") and profile.get("egfr_amplified") is None:
-        issues.append("EGFR amplification status is missing")
-    if profile.get("who_grade") is None:
-        issues.append("WHO grade is missing -- affects trial eligibility")
-    if not profile.get("prior_treatments"):
-        issues.append("No prior treatments listed -- affects trial matching")
-    if profile.get("age_range") == "75+":
-        issues.append("Age >= 75 -- may be excluded from many trials, check KPS")
-    return issues
-
-
-SAMPLE_PATIENTS = [
-    {"id": "Syn-001", "label": "Classic GBM, IDH-wildtype, MGMT-unmethylated", "profile": {"patient_id": "Syn-001", "age_range": "55-65", "mgmt_methylated": False, "idh_mutant": False, "egfr_amplified": True, "egfrviii_positive": True, "p53_mutant": False, "pteng_loss": True, "tumor_location": "temporal", "who_grade": 4, "prior_treatments": ["Surgery (GTR)", "RT (Stupp Protocol)", "TMZ (Adjuvant)"]}},
-    {"id": "Syn-002", "label": "Proneural GBM, IDH-mutant, MGMT-methylated (favorable)", "profile": {"patient_id": "Syn-002", "age_range": "30-45", "mgmt_methylated": True, "idh_mutant": True, "egfr_amplified": False, "egfrviii_positive": False, "p53_mutant": True, "pteng_loss": False, "tumor_location": "frontal", "who_grade": 4, "prior_treatments": ["Surgery (GTR)", "RT (Stupp Protocol)"]}},
-    {"id": "Syn-003", "label": "Mesenchymal GBM, NF1-loss, recurrent", "profile": {"patient_id": "Syn-003", "age_range": "45-60", "mgmt_methylated": False, "idh_mutant": False, "egfr_amplified": False, "egfrviii_positive": False, "p53_mutant": True, "pteng_loss": True, "tumor_location": "parietal", "who_grade": 4, "prior_treatments": ["Surgery (STR)", "RT (Stupp Protocol)", "TMZ (Adjuvant)", "Bevacizumab"]}},
-    {"id": "Syn-004", "label": "Elderly GBM, MGMT-methylated, limited treatment", "profile": {"patient_id": "Syn-004", "age_range": "75+", "mgmt_methylated": True, "idh_mutant": False, "egfr_amplified": True, "egfrviii_positive": False, "p53_mutant": False, "pteng_loss": True, "tumor_location": "frontal", "who_grade": 4, "prior_treatments": ["Surgery (STR)", "TMZ (Adjuvant)"]}},
-    {"id": "Syn-005", "label": "Secondary GBM (from WHO grade 3), IDH-mutant", "profile": {"patient_id": "Syn-005", "age_range": "30-45", "mgmt_methylated": True, "idh_mutant": True, "egfr_amplified": False, "egfrviii_positive": False, "p53_mutant": True, "pteng_loss": False, "tumor_location": "temporal", "who_grade": 4, "prior_treatments": ["Surgery (GTR)", "RT (Stupp Protocol)", "TMZ (Adjuvant)", "Clinical Trial"]}},
-]
-
-
-def _classify_subtype(profile):
-    if profile.get("idh_mutant"):
-        return "Proneural"
-    if profile.get("egfrviii_positive") or profile.get("egfr_amplified"):
-        return "Classical"
-    if profile.get("pteng_loss") and not profile.get("egfr_amplified"):
-        return "Mesenchymal"
-    return "Unclassified"
-
-
-def _recommend_treatments(profile):
-    recs = []
-    subtype = _classify_subtype(profile)
-
-    if profile.get("mgmt_methylated"):
-        recs.append({"drug": "Temozolomide (TMZ)", "evidence": "Strong", "rationale": "MGMT methylated -- TMZ sensitivity predicted. Stupp protocol standard of care."})
-    else:
-        recs.append({"drug": "Temozolomide (TMZ)", "evidence": "Moderate", "rationale": "MGMT unmethylated -- reduced TMZ efficacy. Consider CCNU or clinical trial."})
-        recs.append({"drug": "Lomustine (CCNU)", "evidence": "Moderate", "rationale": "Alternative alkylating agent for MGMT-unmethylated GBM."})
-
-    if profile.get("idh_mutant"):
-        recs.append({"drug": "Ivosidenib (AG-120)", "evidence": "Strong", "rationale": "IDH1-mutant -- FDA-approved for cholangiocarcinoma, active in IDH1-mutant glioma (NCT02340156)."})
-        recs.append({"drug": "Vorasidenib (Voranigo)", "evidence": "Strong", "rationale": "Dual IDH1/2 inhibitor -- FDA-approved for grade 2 gliomas, BBB-penetrant (INDIGO trial). PFS 27.7 vs 11.1 months."})
-
-    if profile.get("egfrviii_positive") or profile.get("egfr_amplified"):
-        recs.append({"drug": "EGFR-targeted therapy", "evidence": "Moderate", "rationale": "EGFR amplification/EGFRvIII -- consider erlotinib, gefitinib, or EGFRvIII vaccine trials (NCT03152318)."})
-        recs.append({"drug": "Lapatinib (EGFR/HER2)", "evidence": "Moderate", "rationale": "Dual EGFR/HER2 inhibitor -- BBB-penetrant, some GBM activity."})
-
-    if profile.get("pteng_loss"):
-        recs.append({"drug": "PI3K/mTOR inhibitor", "evidence": "Moderate", "rationale": "PTEN loss -- PI3K/AKT pathway activated. Consider BEZ235, everolimus, or AZD8055."})
-        recs.append({"drug": "Temsirolimus", "evidence": "Moderate", "rationale": "mTOR inhibitor -- PTEN-deficient GBM, Phase II trial (NCI-06-C-0064E)."})
-
-    if profile.get("p53_mutant"):
-        recs.append({"drug": "MDM2 inhibitor (if MDM2 amplified)", "evidence": "Weak", "rationale": "p53 mutant -- limited direct targets, consider clinical trials targeting p53 pathway."})
-
-    recs.append({"drug": "TTFields (Optune)", "evidence": "Strong", "rationale": "Device-based therapy -- FDA-approved for newly diagnosed and recurrent GBM. Extend survival by ~5 months."})
-
-    if subtype == "Mesenchymal":
-        recs.append({"drug": "Anti-TNF-alpha / NF-kB pathway", "evidence": "Moderate", "rationale": "Mesenchymal subtype -- NF-kB-driven, consider bortezomib or TNF inhibitors."})
-        recs.append({"drug": "MET inhibitor", "evidence": "Moderate", "rationale": "Mesenchymal subtype -- MET overexpressed, capmatinib or tepotinib under investigation."})
-
-    if len(profile.get("prior_treatments", [])) > 3:
-        recs.append({"drug": "Clinical trial enrollment", "evidence": "Strong", "rationale": "Recurrent/refractory disease -- strongly consider enrollment in Phase I/II trials."})
-
-    return recs
-
-
-def tab_anonymizer():
-    st.markdown('<div class="section-header">Brain Cancer Cell Lines & Clinical Trial Matching</div>', unsafe_allow_html=True)
-
-    tab_cell, tab_trial, tab_subtype = st.tabs([
-        "Cell Line Database",
-        "Clinical Trial Matching",
-        "Molecular Subtype & Treatment Planning",
-    ])
-
-    # --- Cell Line Database ---
-    with tab_cell:
-        st.markdown("**Brain Cancer Cell Line Database**")
-        st.caption(f"Loaded {len(BRAIN_CANCER_CELL_LINES)} cell lines. Mutation profiles, drug sensitivities, and tissue source data.")
-
-        cell_lines = list(BRAIN_CANCER_CELL_LINES.keys())
-        selected_line = st.selectbox("Select cell line", cell_lines)
-
-        line_data = BRAIN_CANCER_CELL_LINES[selected_line]
-
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"**{selected_line}**")
-            st.markdown(f"**Tissue:** {line_data['tissue']}")
-            st.markdown(f"**Origin:** {line_data['origin']}")
-            st.markdown(f"**Markers:** {line_data['markers']}")
-        with c2:
-            st.markdown("**Mutation Profile:**")
-            for gene, status in line_data["mutations"].items():
-                color = "var(--success)" if "wildtype" in status.lower() or "methylated" in status.lower() else "var(--danger)" if "mutated" in status.lower() or "deleted" in status.lower() else "var(--warning)"
-                st.markdown(f"  - **{gene}:** {status}")
-
-        st.markdown("**Drug Sensitivity Profile:**")
-        st.error(
-            "\u26a0\ufe0f THESE IC50 VALUES ARE PLACEHOLDER/REFERENCE NUMBERS "
-            "BUILT INTO THE APP \u2014 THEY ARE NOT CITED AND NOT YOUR MEASURED "
-            "DATA. Do NOT paste any number from this table into your thesis. "
-            "Use them only to see how the interface works. For real IC50s, use "
-            "the '4PL IC50 Fit' tab on YOUR dose-response data, and cite primary "
-            "literature (with DOI/PMID) for any published value."
-        )
-        drug_df = pd.DataFrame([
-            {"Drug": drug, "IC50 (uM)": vals["ic50_um"], "Response": vals["response"]}
-            for drug, vals in line_data["sensitivity"].items()
-        ]).sort_values("IC50 (uM)")
-        st.dataframe(drug_df, use_container_width=True, height=350)
-
-        st.markdown("**Cross-Line Comparison (all cell lines):**")
-        compare_lines = st.multiselect("Compare cell lines", cell_lines, default=["U251 MG", "U87 MG"])
-        if len(compare_lines) >= 2:
-            compare_drugs = st.multiselect("Compare drugs", list(BRAIN_CANCER_CELL_LINES[compare_lines[0]]["sensitivity"].keys()),
-                                           default=["NSC-95397", "NSC-663284", "Temozolomide", "Vorinostat"])
-            comparison = []
-            for drug in compare_drugs:
-                row = {"Drug": drug}
-                for cl in compare_lines:
-                    row[f"{cl} IC50"] = BRAIN_CANCER_CELL_LINES[cl]["sensitivity"].get(drug, {}).get("ic50_um", "N/A")
-                    row[f"{cl} Response"] = BRAIN_CANCER_CELL_LINES[cl]["sensitivity"].get(drug, {}).get("response", "N/A")
-                comparison.append(row)
-            st.dataframe(pd.DataFrame(comparison), use_container_width=True)
-
-    # --- Clinical Trial Matching ---
-    with tab_trial:
-        st.markdown("**Clinical Trial Matching Engine**")
-        st.caption(f"Loaded {len(CLINICAL_TRIALS)} GBM clinical trials. Enter patient profile to generate ranked matches.")
-
-        st.markdown("**Patient Profile for Matching**")
-        vc1, vc2, vc3 = st.columns(3)
-        with vc1:
-            match_patient_id = st.text_input("Patient ID", value="MATCH-001", key="match_id")
-            match_age = st.selectbox("Age Range", ["18-30", "30-45", "45-60", "60-75", "75+"], key="match_age")
-            match_grade = st.selectbox("WHO Grade", [4, 3, 2, 1], key="match_grade")
-        with vc2:
-            match_mgmt = st.checkbox("MGMT Methylated", key="match_mgmt")
-            match_idh = st.checkbox("IDH1/2 Mutant", key="match_idh")
-            match_egfr = st.checkbox("EGFR Amplified", key="match_egfr")
-        with vc3:
-            match_egfrviii = st.checkbox("EGFRvIII Positive", key="match_egfrviii")
-            match_p53 = st.checkbox("p53 Mutant", key="match_p53")
-            match_pten = st.checkbox("PTEN Loss", key="match_pten")
-            match_braf = st.checkbox("BRAF V600E", key="match_braf")
-
-        match_treatments = st.multiselect("Prior Treatments", [
-            "Surgery (GTR)", "Surgery (STR)", "RT (Stupp Protocol)", "TMZ (Adjuvant)",
-            "Bevacizumab", "Carmustine wafer", "Optune (TTFields)", "Clinical Trial",
-        ], key="match_treatments")
-
-        if st.button("Run Trial Matching", type="primary", use_container_width=True, key="run_match"):
-            profile = {
-                "patient_id": match_patient_id, "age_range": match_age, "who_grade": match_grade,
-                "mgmt_methylated": match_mgmt, "idh_mutant": match_idh, "egfr_amplified": match_egfr,
-                "egfrviii_positive": match_egfrviii, "p53_mutant": match_p53, "pteng_loss": match_pten,
-                "braf_v600e": match_braf, "prior_treatments": match_treatments,
-            }
-
-            issues = _validate_patient_profile(profile)
-            if issues:
-                st.warning("**Profile Validation Issues:**")
-                for issue in issues:
-                    st.markdown(f"  - {issue}")
-
-            results = []
-            for trial in CLINICAL_TRIALS:
-                match_result = _match_trial(profile, trial)
-                results.append({
-                    "trial": trial,
-                    "match_score": match_result["score"],
-                    "reasons": match_result["reasons"],
-                    "warnings": match_result["warnings"],
-                })
-
-            results.sort(key=lambda x: x["match_score"], reverse=True)
-
-            st.markdown(f"**Match Results for {match_patient_id}:**")
-            for i, r in enumerate(results[:10]):
-                trial = r["trial"]
-                score = r["match_score"]
-                color = "var(--success)" if score >= 60 else "var(--warning)" if score >= 30 else "var(--danger)"
-
-                with st.expander(f"#{i+1}  {trial['nct']} -- Score: {score}/100 -- {trial['drug']}"):
-                    st.markdown(f"**Title:** {trial['title']}")
-                    st.markdown(f"**Phase:** {trial['phase']} | **Status:** {trial['status']}")
-                    st.markdown(f"**Drug:** {trial['drug']}")
-                    st.markdown(f"**Eligibility:** {trial['eligibility']}")
-                    st.markdown(f"**Expected Outcome:** {trial['expected_outcome']}")
-
-                    if r["reasons"]:
-                        st.markdown("**Matching Criteria:**")
-                        for reason in r["reasons"]:
-                            st.markdown(f"  + {reason}")
-                    if r["warnings"]:
-                        st.markdown("**Warnings:**")
-                        for warn in r["warnings"]:
-                            st.markdown(f"  - {warn}")
-
-    # --- Molecular Subtype & Treatment Planning ---
-    with tab_subtype:
-        st.markdown("**GBM Molecular Subtype Classification & Treatment Planning**")
-
-        st.markdown("**Molecular Subtypes**")
-        for subtype, data in GBM_MOLECULAR_SUBTYPES.items():
-            with st.expander(subtype):
-                for k, v in data.items():
-                    st.markdown(f"**{k.replace('_', ' ').title()}:** {v}")
-
-        st.markdown("---")
-        st.markdown("**Patient Profile & Treatment Recommendations**")
-
-        preset = st.selectbox("Load sample patient", ["Manual input"] + [p["label"] for p in SAMPLE_PATIENTS])
-
-        if preset != "Manual input":
-            patient = next(p for p in SAMPLE_PATIENTS if p["label"] == preset)
-            sp = patient["profile"]
-            patient_id = sp["patient_id"]
-            age_range = sp["age_range"]
-            mgmt_methylated = sp["mgmt_methylated"]
-            idh_mutant = sp["idh_mutant"]
-            egfr_amplified = sp["egfr_amplified"]
-            egfrviii_positive = sp["egfrviii_positive"]
-            p53_mutant = sp["p53_mutant"]
-            pteng_loss = sp["pteng_loss"]
-            tumor_location = sp["tumor_location"].title()
-            prior_treatments = sp["prior_treatments"]
-        else:
-            patient_id = st.text_input("Patient ID", value="ANON-001")
-            age_range = st.selectbox("Age Range", ["18-30", "30-45", "45-60", "60-75", "75+"])
-            mgmt_methylated = st.checkbox("MGMT Methylated")
-            idh_mutant = st.checkbox("IDH1/2 Mutant")
-            egfr_amplified = st.checkbox("EGFR Amplified")
-            egfrviii_positive = st.checkbox("EGFRvIII Positive")
-            p53_mutant = st.checkbox("p53 Mutant")
-            pteng_loss = st.checkbox("PTEN Loss")
-            tumor_location = st.selectbox("Location", ["Temporal", "Frontal", "Parietal", "Occipital", "Insular", "Brainstem"])
-            prior_treatments = st.multiselect("Prior Treatments", [
-                "Surgery (GTR)", "Surgery (STR)", "RT (Stupp Protocol)", "TMZ (Adjuvant)",
-                "Bevacizumab", "Carmustine wafer", "Optune (TTFields)", "Clinical Trial",
-            ])
-
-        smiles_for_eval = st.text_input("Compound SMILES for viability assessment", value="CN1N=NC2=C(N=CN2C1=O)C(N)=O")
-
-        if st.button("Generate Treatment Plan", type="primary", use_container_width=True):
-            profile_data = {
-                "patient_id": patient_id, "age_range": age_range, "mgmt_methylated": mgmt_methylated,
-                "idh_mutant": idh_mutant, "egfr_amplified": egfr_amplified, "egfrviii_positive": egfrviii_positive,
-                "p53_mutant": p53_mutant, "pteng_loss": pteng_loss, "tumor_location": tumor_location.lower(),
-                "prior_treatments": prior_treatments,
-            }
-
-            subtype = _classify_subtype(profile_data)
-            subtype_data = GBM_MOLECULAR_SUBTYPES.get(subtype, {})
-
-            st.markdown(f"**Predicted Subtype:** {subtype}")
-            if subtype_data:
-                for k, v in subtype_data.items():
-                    st.markdown(f"  - **{k.replace('_', ' ').title()}:** {v}")
-
-            recommendations = _recommend_treatments(profile_data)
-            st.markdown("**Treatment Recommendations (evidence-based):**")
-            for rec in recommendations:
-                evidence_color = {"Strong": "var(--success)", "Moderate": "var(--warning)", "Weak": "var(--danger)"}.get(rec["evidence"], "var(--text-secondary)")
-                st.markdown(f"- **{rec['drug']}** [{rec['evidence']}] -- {rec['rationale']}")
-
-            if smiles_for_eval.strip():
-                compound_result = screen_compound(smiles_for_eval)
-                if compound_result.valid:
-                    ev = evaluate_lead(
-                        smiles=compound_result.canonical_smiles,
-                        compound_metrics=vars(compound_result),
-                        patient_profile=PatientProfile(**profile_data),
-                    )
-                    vc = "verdict-viable" if "VIABLE" in ev.overall_verdict else "verdict-rejected" if "REJECTED" in ev.overall_verdict else "verdict-conditional"
-                    st.markdown(f'<div class="verdict-box {vc}">{ev.overall_verdict} (Composite: {ev.composite_score:.1f})</div>', unsafe_allow_html=True)
-
-                    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
-                    sc1.metric("Composite", f"{ev.composite_score:.1f}")
-                    sc2.metric("Chemistry", f"{ev.chemistry_score:.1f}")
-                    sc3.metric("Docking", f"{ev.docking_score:.1f}")
-                    sc4.metric("Toxicity", f"{ev.toxicity_score:.1f}")
-                    sc5.metric("Patient Match", f"{ev.patient_match_score:.1f}")
-
-                    pdf = generate_pdf_report(ev)
-                    docx = generate_docx_report(ev)
-                    dc1, dc2 = st.columns(2)
-                    with dc1:
-                        st.download_button(T["export_pdf"], data=pdf, file_name=f"eval_{patient_id}_{datetime.now().strftime('%Y%m%d')}.pdf", mime="application/pdf", use_container_width=True)
-                    with dc2:
-                        if docx:
-                            st.download_button(T["export_docx"], data=docx, file_name=f"eval_{patient_id}_{datetime.now().strftime('%Y%m%d')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+# TAB 4 (live public-data explorer) lives in explorer_tab.py; no facts are hard-coded here.
 
 
 # ============================================================
@@ -3483,13 +2663,38 @@ def main():
         '</div>',
         unsafe_allow_html=True,
     )
+    with st.expander("📲 Get the app / build an installable package", expanded=False):
+        st.markdown(
+            "**The honest truth:** this is a web app. There is no magic one-click "
+            "button that turns it into an App Store download — that is a browser/OS "
+            "feature, not something a page button can force. Two real ways to "
+            "'install' it:\n\n"
+            "**A. Install it as-is (fastest, free, works now):** use your browser's "
+            "own install — Android/Chrome menu ⋮ → *Install app*; iPhone/iPad "
+            "Safari Share → *Add to Home Screen*; Windows/Mac Chrome/Edge → the "
+            "install icon in the address bar. You get a real home-screen icon that "
+            "opens full-screen.\n\n"
+            "**B. Generate real installable packages (Android .apk/.aab, Windows, "
+            "iOS) with PWABuilder** — a free Microsoft tool. Paste your live URL "
+            "below and open it:")
+        appurl = st.text_input("Your live app URL",
+                               placeholder="https://your-app.streamlit.app",
+                               key="pwa_url")
+        if appurl.strip():
+            from urllib.parse import quote_plus
+            pb = f"https://www.pwabuilder.com/reportcard?site={quote_plus(appurl.strip())}"
+            st.markdown(f"➡️ [Open PWABuilder for this app]({pb}) — it packages the "
+                        "site for Android / Windows / iOS so people can download "
+                        "and install it like a normal app.")
+        st.caption("Research/educational use only — not a medical device, however "
+                   "it is installed.")
     render_sidebar_chat()
 
-    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_cite, tab5, tab_nb = st.tabs([
+    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_cite, tab5, tab_nb, tab_lim = st.tabs([
         "Chat with Papers", T["tab1"], T["tab2"], "Docking Validation",
         T["tab3"], T["tab4"],
         "4PL IC50 Fit", "Citations",
-        "AI Chat Assistant", "Lab Notebook",
+        "AI Chat Assistant", "Lab Notebook", "Limitations & Honesty",
     ])
 
     with tab_pdfchat:
@@ -3506,7 +2711,7 @@ def main():
     with tab3:
         tab_research()
     with tab4:
-        tab_anonymizer()
+        tab_data_explorer()
     with tab_ic50:
         tab_kinetics()
     with tab_cite:
@@ -3515,6 +2720,8 @@ def main():
         tab_chat_assistant()
     with tab_nb:
         tab_lab_notebook()
+    with tab_lim:
+        tab_limitations()
 
 
 if __name__ == "__main__":
