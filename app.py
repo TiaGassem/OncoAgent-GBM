@@ -2691,10 +2691,10 @@ def main():
                    "it is installed.")
     render_sidebar_chat()
 
-    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_cite, tab5, tab_nb, tab_lim = st.tabs([
+    tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_stat, tab_omics, tab_cite, tab5, tab_nb, tab_lim = st.tabs([
         "Chat with Papers", T["tab1"], T["tab2"], "Docking Validation",
         T["tab3"], T["tab4"],
-        "4PL IC50 Fit", "Citations",
+        "4PL IC50 Fit", "Statistics", "Omics & Tools", "Citations",
         "AI Chat Assistant", "Lab Notebook", "Limitations & Honesty",
     ])
 
@@ -2715,6 +2715,12 @@ def main():
         tab_data_explorer()
     with tab_ic50:
         tab_kinetics()
+    with tab_stat:
+        from stats_tab import tab_statistics
+        tab_statistics(lang_choice)
+    with tab_omics:
+        from analysis_tab import tab_analysis
+        tab_analysis(lang_choice)
     with tab_cite:
         tab_citations()
     with tab5:

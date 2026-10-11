@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.3.0 - 2026-10-11
+### Added
+- **Omics & Tools tab** (labels in EN/FR/AR): differential expression (Welch / Mann-Whitney + Benjamini-Hochberg FDR, volcano, PCA), gene-set over-representation from a GMT file, single-gene co-expression, on user-uploaded tables.
+- **Compound tools:** PAINS and Brenk structural alerts, QED, Murcko scaffolds, Tanimoto similarity, Butina clustering (RDKit).
+- **Structure tools:** ligand-residue contacts and H-bond candidates; AlphaFold pLDDT summary.
+- 10 new tests cross-checked against SciPy/RDKit. On imatinib-Abl (1IEP) the contact tool recovers the literature residues (Thr315, Met318, Glu286, Asp381, His361).
+- Resources tab: link-outs for what needs GPUs or specialised servers (AlphaFold DB, ESM Atlas, SwissADME, ProTox-3, Open Targets, DepMap).
+
+## 2.2.1 - 2026-10-11
+### Fixed
+- **Docking crashed on every run** with the Python Vina binding (`dock()` got an unexpected `energy_range`; `cpu` belongs to the constructor). Found by a real redocking test.
+- Deprecated `utcnow()`; `meeko` needs `gemmi` (added to requirements, plus `vina`).
+### Verified (this release)
+- Real redocking of imatinib into Abl (PDB 1IEP) through the app's own pipeline: top-pose RMSD 0.90 A (seed 42) and 0.90 A (seed 7), best energy -13.26 / -13.25 kcal/mol. Re-run with `python scripts/redock_1iep.py`.
+### Added
+- `scripts/redock_1iep.py`, `scripts/smoke_live.py` (live-service check; fails loudly, never shows fake values).
+
+## 2.2.0 - 2026-10-11
+### Added
+- `stats_module.py` + Statistics tab: Kaplan-Meier, two-group log-rank, docking ROC AUC / enrichment factor on user-supplied CSVs; EN/FR/AR text. Log-rank reproduces the Freireich textbook values in tests.
+- `PUBLISHING.md` (release + Zenodo checklist), ORCID in `CITATION.cff`, README brought up to date.
+
 ## 2.1.0 - 2026-10-11
 ### Removed (invented numbers / unsupported claims)
 - LogP-binned "LD50 estimate" and GHS class (no validated model). LD50 is now "not estimated"; ProTox-3 values can still be entered.

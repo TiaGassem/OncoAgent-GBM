@@ -707,7 +707,7 @@ def run_vina_docking(
     result = DockingResult(grid_box=grid_box)
     result.seed = int(seed)
     result.exhaustiveness = int(exhaustiveness)
-    result.timestamp = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    result.timestamp = _dt.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     result.vina_version = _vina_version()
 
     if HAS_VINA_PYTHON:
@@ -730,9 +730,9 @@ def _run_vina_python(
     """Run docking using the Python Vina binding."""
     try:
         try:
-            v = Vina(sf_name="vina", seed=int(seed))
+            v = Vina(sf_name="vina", seed=int(seed), cpu=int(cpu))
         except TypeError:
-            v = Vina(sf_name="vina")  # older binding: no seed kwarg
+            v = Vina(sf_name="vina")  # older binding: no seed/cpu kwarg
         v.set_receptor(receptor_pdbqt)
         v.set_ligand_from_file(ligand_pdbqt)
         result.command = (
@@ -745,14 +745,11 @@ def _run_vina_python(
             center=[grid_box.center_x, grid_box.center_y, grid_box.center_z],
             box_size=[grid_box.size_x, grid_box.size_y, grid_box.size_z],
         )
-        v.dock(
-            exhaustiveness=exhaustiveness,
-            n_poses=num_modes,
-            energy_range=energy_range,
-            cpu=cpu,
-        )
+        # Vina python API: dock(exhaustiveness, n_poses, min_rmsd, max_evals);
+        # energy_range belongs to poses()/energies(), cpu to the constructor.
+        v.dock(exhaustiveness=exhaustiveness, n_poses=max(num_modes, 20))
 
-        energies = v.energies()
+        energies = v.energies(n_poses=num_modes, energy_range=float(energy_range))
         result.binding_affinity = round(float(energies[0][0]), 2)
         result.num_modes = len(energies)
         result.rmsd_lower = round(float(energies[0][1]), 3) if len(energies[0]) > 1 else 0
@@ -766,7 +763,7 @@ def _run_vina_python(
                 "rmsd_upper": round(float(e[2]), 3) if len(e) > 2 else 0,
             })
 
-        result.ligand_pdbqt = v.poses()
+        result.ligand_pdbqt = v.poses(n_poses=num_modes, energy_range=float(energy_range))
         result.estimated_ki = _energy_to_ki(result.binding_affinity)
         result.binding_likelihood = _classify_binding(result.binding_affinity)
 

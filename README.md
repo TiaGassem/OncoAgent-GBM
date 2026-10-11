@@ -29,6 +29,8 @@ phosphatase family (CDC25A/B/C) as therapeutic targets in glioblastoma.
 | **PDF Chat** | Extractive Q&A over uploaded papers | passage retrieval (quotes only) |
 | **AI Chat Assistant** | Source-cited GBM Q&A, with optional bring-your-own-key fluent mode | grounded retrieval + optional user LLM (rephrase only) |
 | **Live Data Explorer** | cBioPortal cohort mutation fractions, ChEMBL drug/mechanism lookup, ClinicalTrials.gov *registry listing* (no eligibility matching), Europe PMC search, cell-line link-outs (Cellosaurus/DepMap) | live REST APIs; each result shows source, retrieval time, licence note |
+| **Statistics** | Kaplan-Meier + log-rank on your CSV; docking enrichment (ROC AUC, enrichment factor) from your actives/decoys scores. English / French / Arabic | NumPy/SciPy, validated against the Freireich leukaemia data (log-rank chi2 = 16.79) |
+| **Omics & Tools** | Differential expression + volcano + PCA, gene-set enrichment (GMT), co-expression, PAINS/Brenk alerts, QED, clustering, ligand contacts, pLDDT summary — on YOUR uploaded data | NumPy/SciPy/pandas, RDKit; cross-checked against SciPy in tests |
 | **Run cards** | JSON record of inputs, parameters, versions, timestamp for docking and lookups | `runcard.py` |
 | **Lab protocol library** | 16 open-access GBM/oncology assay templates (spheroid, viability/MTT, scratch, clonogenic, Western blot, qRT-PCR, flow cytometry cell-cycle & apoptosis, caspase-3/7, IF/ICC, transwell, comet, EdU/BrdU, docking+MD, in-silico ADMET) | templates with `[verify]` placeholders + live PubMed/PMC lookup |
 | **My Lab Notebook** | Write your own notes/protocols, keep them private to your session, export to Word/PDF/Markdown, encrypted backup | python-docx + fpdf2 + Fernet (AES) |
@@ -44,11 +46,11 @@ It is a responsive web app: open the link on any device. To get an app-like icon
 "Add to Home Screen" (iOS Safari / Android Chrome) or "Install this site as an app"
 (Chrome/Edge on Windows/Mac). No app store, research use only.
 
-## What's new in 2.0 (see CHANGELOG.md and AUDIT.md)
-Hard-coded clinical-trial matching, patient samples, cell-line IC50/mutation tables and 27 incorrect drug
-structures were removed. Facts are now fetched live with provenance, structures are formula-verified by tests,
-and a *Limitations & Honesty* tab is included. Live API adapters still need a smoke test on a networked machine:
-`python -m data_sources`.
+## Status (v2.3.0)
+Research prototype with automated tests (`pytest -q`, run in CI). See `CHANGELOG.md` for what changed and
+`AUDIT.md` for what is verified and what is still open. Invented numbers (LD50 estimates, patient matching,
+"viable lead" verdicts, credibility scores) were removed in 2.1. Docking with Vina/OpenBabel and the live API
+adapters still need a run on a machine with those tools and internet access.
 
 ## Scientific integrity principles
 
@@ -120,3 +122,12 @@ cite AutoDock Vina, RDKit and the method references listed in
 
 Provided for research and education. No warranty. Not for clinical, diagnostic
 or therapeutic use.
+
+
+## Tests and contributing
+`pip install -r requirements-dev.txt && pytest -q` (26 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
+statistics against textbook values, headless app load). Issues and pull requests are welcome; every scientific
+claim added must carry a DOI/PMID or be labelled "author convention".
+
+## Cite
+See `CITATION.cff`. Add the Zenodo DOI after your first release (see `PUBLISHING.md`).
