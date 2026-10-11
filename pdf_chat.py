@@ -263,7 +263,7 @@ def format_answer_markdown(ans: Answer) -> str:
     if not ans.quotes:
         return (f"**Question:** {ans.question}\n\n"
                 f"{ans.note or 'No validated evidence found.'}\n\n"
-                f"**Credibility score:** {ans.confidence}/100")
+                f"**Query-term coverage (not a correctness score):** {ans.confidence}/100")
     lines = [f"**Question:** {ans.question}", "",
              "**Verbatim evidence from your document(s)** "
              "(nothing is paraphrased or generated):", ""]
@@ -272,6 +272,6 @@ def format_answer_markdown(ans: Answer) -> str:
                      f"   \u2014 *{q['source']}, p.{q['page']}* "
                      f"(terms matched: {q['terms_matched']})")
     lines.append("")
-    lines.append(f"**Credibility score:** {ans.confidence}/100 "
+    lines.append(f"**Query-term coverage (not a correctness score):** {ans.confidence}/100 "
                  f"(extractive: every line above is a direct quote you can verify on the cited page)")
     return "\n".join(lines)

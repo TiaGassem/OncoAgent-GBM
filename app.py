@@ -5,6 +5,7 @@ Research and education only. Not a medical device."""
 from __future__ import annotations
 
 import os
+import re
 import sys
 import io
 import json
@@ -35,6 +36,7 @@ from research_module import (
     search_pubmed, format_citation_apa, format_citation_bibtex,
     get_gbm_queries, get_gbm_reference_guide, format_multiple_citations,
     get_crossref_doi, get_related_papers, build_paper_index, query_paper_index,
+    fetch_articles_by_id,
 )
 from pdf_chat import (
     build_passage_index, answer_extractive, format_answer_markdown, HAS_PYPDF,
@@ -501,11 +503,11 @@ def tab_compound_screening():
                     st.markdown(f"**SMILES:** `{result.canonical_smiles}`")
 
                 if result.overall_pass:
-                    st.markdown('<div class="verdict-box verdict-viable">PASS -- VIABLE LEAD</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="verdict-box verdict-viable">MEETS Lipinski + BBB rules (screening only)</div>', unsafe_allow_html=True)
                 elif result.lipinski_pass and result.bbb_pass:
-                    st.markdown('<div class="verdict-box verdict-conditional">CONDITIONAL -- Review Required</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="verdict-box verdict-conditional">PARTIAL -- one rule set met</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="verdict-box verdict-rejected">FAIL -- Below Thresholds</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="verdict-box verdict-rejected">Below screening thresholds</div>', unsafe_allow_html=True)
 
             with col_b:
                 st.markdown("**Physicochemical Properties**")
@@ -785,16 +787,11 @@ def render_docking_fallback(ligand_smiles: str, isoform_choice: str,
         st.warning("Could not read this SMILES (RDKit unavailable or invalid "
                    "SMILES), so no estimate is shown. No value is fabricated.")
     else:
-        est = heuristic_affinity_estimate(desc)
-        e1, e2, e3 = st.columns(3)
-        e1.metric("Estimated affinity", f"{est.estimated_affinity_kcal_mol:.2f} kcal/mol",
-                  help="Heuristic estimate from descriptors \u2014 NOT AutoDock Vina.")
-        e2.metric("Approx. Ki", est.estimated_ki)
-        e3.metric("Method", "Descriptor heuristic")
-        st.warning(est.disclaimer)
-        with st.expander("How this estimate was computed (fully transparent)"):
-            st.code(est.rationale, language="text")
-            st.json(est.descriptors_used)
+        st.info("No binding-affinity number is shown without a real docking run "
+                "(AutoDock Vina). Descriptors of your ligand are listed below; "
+                "run docking in the section underneath to get a score.")
+        with st.expander("Ligand descriptors (RDKit)"):
+            st.json(desc)
 
     # ---------- B. How to enable REAL docking ----------
     st.markdown('<div class="section-header">Enable real docking (your input '
@@ -1027,7 +1024,14 @@ def tab_docking():
                 return
 
             receptor_pdbqt = os.path.join(tmpdir, "receptor.pdbqt")
-            pdb_to_pdbqt(receptor_pdb, receptor_pdbqt, is_receptor=True)
+            # Dock into a protein-only receptor: the co-crystal ligand (and other
+            # HETATM groups) must not remain in the pocket during docking.
+            try:
+                protein_only = clean_pdb(receptor_pdb, remove_hetero=True)
+                pdb_to_pdbqt(protein_only, receptor_pdbqt, is_receptor=True)
+            except Exception as e:
+                st.error(f"Receptor preparation failed: {e}")
+                return
 
             final_grid = GridBox(
                 center_x=grid_box.center_x, center_y=grid_box.center_y, center_z=grid_box.center_z,
@@ -1277,7 +1281,7 @@ def tab_research():
         st.markdown("**Citation Generator**")
         sample = st.text_area(
             "Article details",
-            value="PMID: 38368576\nTitle: Novel EGFRvIII-targeted therapy in glioblastoma\nAuthors: Smith J, Doe A, Johnson B\nJournal: Nature Medicine\nYear: 2024\nDOI: 10.1038/s41591-024-0001-1",
+            value="PMID: \nTitle: \nAuthors: \nJournal: \nYear: \nDOI: ",
             height=150,
         )
         cite_format = st.radio("Format", ["APA", "BibTeX"], horizontal=True)
@@ -1309,8 +1313,8 @@ def tab_research():
         st.caption("All data comes from verified public APIs: CrossRef (DOI metadata), PubMed ELink (related articles). No predictions or synthetic text.")
         p1, p2 = st.columns(2)
         with p1:
-            user_doi = st.text_input("DOI", value="10.1038/s41591-024-0001-1", help="Paste DOI from a real paper")
-            user_pmid = st.text_input("PMID (optional)", value="38368576", help="PubMed ID for related-article lookup")
+            user_doi = st.text_input("DOI", value="", help="Paste the DOI of a real paper, e.g. 10.1056/NEJMoa043331")
+            user_pmid = st.text_input("PMID (optional)", value="", help="PubMed ID for related-article lookup (e.g. 15758010)")
 
         if st.button("Explore Paper", type="primary", use_container_width=True):
             with st.spinner("Fetching from CrossRef + PubMed..."):
@@ -1622,11 +1626,10 @@ def _chat_answer_struct(question: str) -> dict:
                 out["sources"].append((label, AGENT_SOURCE_LINKS[label]))
 
     # credibility: validated topic coverage + live literature support
-    n = len(set(topics))
-    score = 50 + 12 * n + (18 if lit_found else 0)
-    if "no validated evidence found" in out["answer"].lower() and not lit_found:
-        score = min(score, 35)
-    out["score"] = int(min(95, score))
+    # Evidence coverage is reported as counts, not as a 0-100 "credibility" number.
+    out["n_topics"] = len(set(topics))
+    out["lit_found"] = bool(lit_found)
+    out["score"] = 0
     return out
 
 
@@ -1654,7 +1657,7 @@ def _chat_answer(question: str) -> str:
         src = " \u00b7 ".join(f"[{lbl}]({url})" for lbl, url in r["sources"])
         lines.append(f"\n**Sources:** {src}")
     if r["matched"]:
-        lines.append(f"\n*Credibility {r['score']}/100 \u00b7 research-only*")
+        lines.append(f"\n*Evidence coverage: {r.get('n_topics', 0)} curated topic(s); live literature hits: {'yes' if r.get('lit_found') else 'no'} \u00b7 research-only, not a correctness score*")
     grounded = "\n".join(lines)
     return _maybe_polish(question, grounded)
 
@@ -1703,11 +1706,9 @@ def _render_chat_struct(r: dict):
         src = " \u00b7 ".join(f"[{lbl}]({url})" for lbl, url in r["sources"])
         st.caption(f"Sources: {src}")
     if r["matched"]:
-        col, bg = _cred_colors(r["score"])
-        st.markdown(
-            f'<span class="cred-badge" style="background:{bg};color:{col}">'
-            f'Credibility {r["score"]}/100 \u00b7 research-only</span>',
-            unsafe_allow_html=True)
+        st.caption(f"Evidence coverage: {r.get('n_topics', 0)} curated topic(s); "
+                   f"live literature hits: {'yes' if r.get('lit_found') else 'no'} "
+                   "\u00b7 research-only, not a correctness score")
 
 
 def _init_conversations():
@@ -2147,7 +2148,7 @@ def tab_pdf_chat():
                       "#fef3c7" if ans.confidence >= 30 else "#fee2e2")
                 st.markdown(
                     f'<span class="cred-badge" style="background:{bg};color:{col}">'
-                    f'Credibility {ans.confidence}/100 \u00b7 extractive</span>',
+                    f'Query-term coverage {ans.confidence}/100 \u00b7 extractive (not a correctness score)</span>',
                     unsafe_allow_html=True)
                 st.write("")
                 if not ans.quotes:

@@ -16,12 +16,15 @@ headless Streamlit load (`streamlit.testing.AppTest`), pytest. Live network call
 | 7 | Dockerfile healthcheck used curl not installed | Low | Fixed |
 | 8 | README cited `oncoagent_methods.bib` that did not exist | Medium | Added (verify DOIs) |
 
-## NOT done / still open (be honest in your thesis and applications)
-- Live adapters are untested against the real services; run `python -m data_sources` and fix any shape mismatch.
-- `agent_evaluator.py` still contains a hard-coded toxicity/lead-evaluation heuristic and `PatientProfile` class; the
-  app no longer exposes patient input, but review or remove it. `anonymizer.py` (medical-note PII) is unused by the UI.
-- `assistant_llm.py`, `library_module.py` and `protocols.py` contain typed-in text; each protocol/claim still needs a
-  PMID/DOI or an "author convention" label. Not reviewed line by line.
-- CGGA/TCGA survival statistics, DepMap, GDSC, Cellosaurus API, Arabic RTL layout, docking decoy enrichment: not implemented.
-- No expert (neuro-oncologist / cell biologist) review yet. Licences of data sources not legally reviewed.
-- Redocking RMSD has no symmetry correction (stated in README).
+## Status after v2.1.0 (2026-10-11)
+Verified by running: 11 pytest tests pass, ruff (syntax/undefined-name) clean, app loads headless without exceptions,
+PDF and DOCX report export produce valid files, redocking RMSD handles PDBQT polar hydrogens.
+
+## NOT done / still open (state these honestly in the thesis and in applications)
+- Never run end-to-end with a real Vina + OpenBabel docking job in this audit; test it yourself on a co-crystal case (redock, RMSD <= 2 A).
+- Live adapters (cBioPortal, ChEMBL, ClinicalTrials.gov, Europe PMC) were not exercised against the real services here.
+- `protocols.py`, `library_module.py`, `assistant_llm.py`, the reference guide: typed-in text. Each claim still needs a PMID/DOI or an "author convention" label; only the MGMT figure was verified.
+- Structural-alert "toxicity" screen and the composite weights are author conventions, not validated models.
+- Not implemented: TCGA/CGGA survival statistics, DepMap, GDSC, Cellosaurus API, Arabic RTL, docking decoy enrichment.
+- No expert review (neuro-oncologist / cell biologist) and no legal review of data-source licences.
+- Redocking RMSD has no symmetry correction.

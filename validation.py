@@ -57,11 +57,14 @@ def _parse_heavy_atom_xyz(text: str) -> List[Tuple[str, float, float, float]]:
                 continue
             name = line[12:16].strip()
             element = line[76:78].strip() if len(line) >= 78 else ""
-            tag = (element or name).upper()
-            if tag.startswith("H") and tag not in ("HG", "HF", "HO", "HE", "HS"):
-                # skip hydrogens (names like H, H1, HA...). Keep rare metals.
-                if element == "H" or (not element and name[:1] == "H"):
-                    continue
+            # PDBQT stores AutoDock atom types in cols 78-79 ('HD', 'HS' = polar H,
+            # 'A' = aromatic C, 'OA', 'NA', 'SA'...). PDB stores the element.
+            ad_type = line[77:79].strip().upper() if len(line) >= 79 else ""
+            if ad_type in ("H", "HD", "HS") or element.upper() in ("H", "D"):
+                continue
+            if not element and not ad_type and name[:1].upper() == "H":
+                continue
+            tag = (element or ad_type or name).upper()
             atoms.append((tag, x, y, z))
         elif rec == "ENDMDL" and seen_atom:
             break

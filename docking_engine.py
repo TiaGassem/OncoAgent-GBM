@@ -643,8 +643,7 @@ def _rdkit_to_rigid_pdbqt(mol, output_path: str) -> str:
 def pdb_to_pdbqt(pdb_path: str, output_path: str, is_receptor: bool = True) -> str:
     """Convert a PDB file to PDBQT format for Vina docking.
 
-    Prefers OpenBabel (`obabel`, credible atom typing + charges); falls back to
-    a lightweight heuristic typing only if OpenBabel is unavailable.
+    Requires OpenBabel (`obabel`) for atom typing and charges; raises if unavailable.
     """
     obabel = shutil.which("obabel") or shutil.which("babel")
     if obabel is not None:
@@ -659,65 +658,20 @@ def pdb_to_pdbqt(pdb_path: str, output_path: str, is_receptor: bool = True) -> s
                     and os.path.getsize(output_path) > 0:
                 return output_path
         except Exception:
-            pass  # fall through to heuristic
+            pass  # fall through to explicit error
     return _convert_pdb_to_pdbqt(pdb_path, output_path, is_ligand=not is_receptor)
 
 
 def _convert_pdb_to_pdbqt(
     pdb_path: str, output_path: str, is_ligand: bool = False
 ) -> str:
-    """Convert PDB to PDBQT using a simple atom-typing heuristic.
-
-    For production use, AutoDockTools or Meeko is preferred. This provides
-    a basic fallback for receptor preparation.
-    """
-    ATOM_CHARGES = {
-        "C": 0.0, "CA": 0.0, "CB": 0.0, "CG": 0.0, "CD": 0.0, "CE": 0.0,
-        "CZ": 0.0, "CH2": 0.0, "NE": -0.35, "NH": -0.35, "NH1": -0.40,
-        "NH2": -0.40, "ND": -0.35, "NZ": -0.25, "N": -0.35, "O": -0.40,
-        "OG": -0.40, "OH": -0.40, "OD": -0.40, "OE": -0.40, "SD": -0.10,
-        "SG": -0.10, "P": 0.50, "F": -0.20, "CL": -0.15, "BR": -0.15,
-        "I": -0.15, "FE": 0.30, "MG": 0.40, "CA2": 0.40, "ZN": 0.30,
-    }
-
-    VINA_TYPES = {
-        "C": "C", "CA": "C", "CB": "C", "CG": "C", "CD": "C",
-        "N": "NA", "NE": "NA", "NH": "NA", "NH1": "NA", "NH2": "NA",
-        "ND": "NA", "NZ": "NA",
-        "O": "OA", "OG": "OA", "OH": "OA", "OD": "OA", "OE": "OA",
-        "S": "SA", "SD": "SA", "SG": "SA",
-        "P": "P", "F": "F", "CL": "CL", "BR": "BR", "I": "I",
-    }
-
-    lines_out = []
-    with open(pdb_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.startswith("ATOM") or line.startswith("HETATM"):
-                if len(line) < 12:
-                    continue
-                atom_name = line[12:16].strip() if len(line) > 15 else ""
-                if not atom_name:
-                    atom_name = "LIG"
-                element = line[76:78].strip() if len(line) > 78 else (atom_name[0] if atom_name else "C")
-                if not element:
-                    element = "C"
-
-                key = atom_name
-                charge = ATOM_CHARGES.get(key, ATOM_CHARGES.get(element, 0.0))
-                vina_type = VINA_TYPES.get(element.upper(), "C")
-                if vina_type is None:
-                    vina_type = "C"
-
-                pdbqt_line = (
-                    f"ATOM  {line[6:12]}{line[12:54]}"
-                    f" {charge:+.3f}     {vina_type}  "
-                )
-                lines_out.append(pdbqt_line + "\n")
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.writelines(lines_out)
-
-    return output_path
+    """No approximate fallback: invented atom types/charges would make docking
+    scores meaningless, so refuse and tell the user what is missing."""
+    raise RuntimeError(
+        "OpenBabel ('obabel') is required to prepare the receptor PDBQT and was "
+        "not found or failed. OncoAgent-GBM does not use approximate atom typing. "
+        "Install OpenBabel (packages.txt on Streamlit Cloud / Dockerfile) and retry."
+    )
 
 
 def _vina_version(vina_path: str = "") -> str:
@@ -1002,7 +956,7 @@ GBM_ONCOGENE_GUIDE = {
     "EGFRvIII": {
         "full_name": "Epidermal Growth Factor Receptor variant III",
         "mutation": "Deletion of exons 2-7, resulting in constitutive activation",
-        "prevalence": "~50% of GBM tumors",
+        "prevalence": "Not stated here: frequency varies by cohort; check TCGA/cBioPortal (Live Data Explorer tab) and the primary literature",
         "pathways": ["RAS/MAPK", "PI3K/AKT/mTOR", "JAK/STAT"],
         "targeting_strategies": [
             "Anti-EGFR monoclonal antibodies (cetuximab, nimotuzumab)",
@@ -1014,14 +968,14 @@ GBM_ONCOGENE_GUIDE = {
     "MGMT": {
         "full_name": "O-6-methylguanine-DNA methyltransferase",
         "mutation": "Promoter methylation (silencing) predicts temozolomide response",
-        "prevalence": "35-45% of GBM patients show promoter methylation",
+        "prevalence": "MGMT promoter methylated in 45% of 206 assessable cases in Hegi et al., N Engl J Med 2005;352:997-1003 (PMID 15758010); varies by cohort",
         "pathways": ["DNA repair", "Alkylation damage response"],
         "clinical_significance": "MGMT methylation = better prognosis with TMZ; key biomarker",
     },
     "IDH1": {
         "full_name": "Isocitrate Dehydrogenase 1",
         "mutation": "R132H hotspot mutation produces 2-hydroxyglutarate (2-HG)",
-        "prevalence": "~8-15% of GBM (higher in secondary GBM)",
+        "prevalence": "Not stated here: the frequency of the IDH1 hotspot mutation differs strongly between primary and secondary GBM; check cBioPortal and the primary literature",
         "pathways": ["Epigenetic regulation via 2-HG", "HIF-1alpha stabilization", "Oncometabolite production"],
         "targeting_strategies": [
             "IDH1 inhibitors (ivosidenib, AG-120 - approved for AML)",

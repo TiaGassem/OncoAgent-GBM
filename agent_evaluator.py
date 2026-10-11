@@ -85,22 +85,6 @@ class ToxicityProfile:
 
 
 @dataclass
-class PatientProfile:
-    """Anonymized patient mutation profile."""
-    patient_id: str = "ANON-000"
-    age_range: str = "50-65"
-    mgmt_methylated: bool = False
-    idh_mutant: bool = False
-    egfr_amplified: bool = False
-    egfrviii_positive: bool = False
-    p53_mutant: bool = False
-    pteng_loss: bool = False
-    tumor_location: str = "temporal"
-    who_grade: int = 4
-    prior_treatments: list[str] = field(default_factory=list)
-
-
-@dataclass
 class LeadEvaluation:
     """Complete lead compound evaluation result."""
     smiles: str = ""
@@ -110,12 +94,10 @@ class LeadEvaluation:
     chemistry_score: float = 0.0
     docking_score: float = 0.0
     toxicity_score: float = 0.0
-    patient_match_score: float = 0.0
     sub_scores: dict = field(default_factory=dict)
     chemistry_details: dict = field(default_factory=dict)
     docking_details: dict = field(default_factory=dict)
     toxicity_details: dict = field(default_factory=dict)
-    patient_match_details: dict = field(default_factory=dict)
     rationale: str = ""
     recommendations: list[str] = field(default_factory=list)
     timestamp: str = ""
@@ -228,41 +210,16 @@ def estimate_toxicity(mol) -> ToxicityProfile:
     else:
         profile.carcinogenicity = "low_risk"
 
-    # --- Oral LD50 estimate (LogP-binned heuristic) ---
-    if logp < 1:
-        profile.ld50_estimate = 5000
-    elif logp < 2:
-        profile.ld50_estimate = 2000
-    elif logp < 3:
-        profile.ld50_estimate = 500
-    elif logp < 4:
-        profile.ld50_estimate = 300
-    else:
-        profile.ld50_estimate = 100
+    # LD50 / GHS class are NOT estimated: no validated model is implemented here.
+    # Use ProTox-3 or experimental data (see the ProTox-3 comparison input).
+    profile.ld50_estimate = 0.0
+    profile.toxicity_class = "Not estimated (use ProTox-3 or experimental data)"
+    profile.oral_toxicity = "Not estimated"
 
-    # --- GHS acute toxicity class derived from LD50 (defensible mapping) ---
-    ld = profile.ld50_estimate
-    if ld <= 5:
-        ghs = "Class 1 (fatal if swallowed)"
-    elif ld <= 50:
-        ghs = "Class 2 (fatal if swallowed)"
-    elif ld <= 300:
-        ghs = "Class 3 (toxic if swallowed)"
-    elif ld <= 2000:
-        ghs = "Class 4 (harmful if swallowed)"
-    elif ld <= 5000:
-        ghs = "Class 5 (may be harmful if swallowed)"
-    else:
-        ghs = "Class 6 (non-toxic)"
-
-    profile.toxicity_class = ghs
-    profile.oral_toxicity = ghs
-
-    # Overall risk combines GHS class and structural-alert burden
-    ghs_num = int(ghs.split()[1].strip("("))
-    if ghs_num <= 3 or tox_score >= 6:
+    # Overall flag = structural-alert burden only (a screening heuristic, not a toxicity prediction)
+    if tox_score >= 6:
         profile.overall_tox_risk = "HIGH"
-    elif ghs_num == 4 or tox_score >= 3:
+    elif tox_score >= 3:
         profile.overall_tox_risk = "MODERATE"
     elif tox_score >= 1:
         profile.overall_tox_risk = "LOW-MODERATE"
@@ -301,17 +258,12 @@ def compare_with_protox(profile: ToxicityProfile, protox: dict) -> dict:
     if protox.get("ld50"):
         try:
             px = float(protox["ld50"])
-            our = float(profile.ld50_estimate)
-            ratio = max(px, our) / max(min(px, our), 1e-9)
-            within_2x = ratio <= 2.0
             rows.append({
                 "Endpoint": "LD50 (mg/kg)",
-                "Heuristic": f"{our:.0f}",
+                "Heuristic": "not estimated",
                 "ProTox-3": f"{px:.0f}",
-                "Agreement": "Yes (within 2x)" if within_2x else f"No ({ratio:.1f}x apart)",
+                "Agreement": "n/a (no local LD50 model)",
             })
-            compared += 1
-            agreed += 1 if within_2x else 0
         except (TypeError, ValueError):
             pass
 
@@ -511,60 +463,12 @@ def score_toxicity(profile: ToxicityProfile) -> tuple[float, dict]:
     return round(score, 1), details
 
 
-def match_patient(profile: PatientProfile, compound_metrics: dict) -> tuple[float, dict]:
-    """Score patient-compound matching based on molecular profile."""
-    score = 50.0
-    details = {}
-
-    if profile.mgmt_methylated:
-        score += 10
-        details["mgmt_match"] = "favorable"
-    else:
-        score -= 5
-        details["mgmt_match"] = "unfavorable"
-        details["mgmt_note"] = "Unmethylated MGMT - TMZ resistance expected"
-
-    if profile.idh_mutant:
-        score += 5
-        details["idh_note"] = "IDH1 mutant - consider IDH1 inhibitor"
-
-    if profile.egfrviii_positive:
-        score += 10
-        details["egfrviii_note"] = "EGFRvIII+ - consider targeted therapy"
-    elif profile.egfr_amplified:
-        score += 5
-        details["egfr_note"] = "EGFR amplified - EGFR-targeted therapy candidate"
-
-    if profile.pteng_loss:
-        score -= 5
-        details["pten_note"] = "PTEN loss - PI3K pathway activation"
-
-    if profile.p53_mutant:
-        score -= 5
-        details["p53_note"] = "p53 mutant - increased genomic instability"
-
-    bbb = compound_metrics.get("bbb_score", 0)
-    if bbb > 0.6:
-        score += 10
-        details["bbb_match"] = "good_brain_penetration"
-    elif bbb > 0.4:
-        score += 5
-        details["bbb_match"] = "moderate_brain_penetration"
-    else:
-        score -= 10
-        details["bbb_match"] = "poor_brain_penetration"
-
-    score = max(0, min(100, score))
-    return round(score, 1), details
-
-
 # --- Main Evaluation ---
 
 def evaluate_lead(
     smiles: str,
     compound_metrics: Optional[dict] = None,
     docking_energy: Optional[float] = None,
-    patient_profile: Optional[PatientProfile] = None,
     compound_name: str = "",
 ) -> LeadEvaluation:
     """Run full lead compound evaluation."""
@@ -578,11 +482,12 @@ def evaluate_lead(
     result.chemistry_score, result.chemistry_details = score_chemistry(compound_metrics)
 
     # Docking scoring
-    if docking_energy is not None:
+    docking_provided = docking_energy is not None
+    if docking_provided:
         result.docking_score, result.docking_details = score_docking(docking_energy)
     else:
-        result.docking_score = 50.0
-        result.docking_details = {"note": "No docking data provided; score set to 50 (neutral)"}
+        result.docking_score = 0.0
+        result.docking_details = {"note": "No docking data provided; docking is excluded from the composite (not scored)."}
 
     # Toxicity scoring
     if HAS_RDKIT and smiles:
@@ -602,40 +507,30 @@ def evaluate_lead(
         "tox_class": tox_profile.toxicity_class,
     }
 
-    # Patient matching
-    if patient_profile:
-        result.patient_match_score, result.patient_match_details = match_patient(
-            patient_profile, compound_metrics
-        )
-    else:
-        result.patient_match_score = 50.0
-        result.patient_match_details = {"note": "No patient profile provided"}
-
-    # Composite score (weighted average)
-    weights = {"chemistry": 0.30, "docking": 0.30, "toxicity": 0.25, "patient": 0.15}
-    result.composite_score = round(
-        weights["chemistry"] * result.chemistry_score
-        + weights["docking"] * result.docking_score
-        + weights["toxicity"] * result.toxicity_score
-        + weights["patient"] * result.patient_match_score,
-        1,
-    )
+    # Composite = weighted mean over the components that were actually provided.
+    # (Screening aid only: weights are author conventions, not validated.)
+    weights = {"chemistry": 0.40, "toxicity": 0.30}
+    scores = {"chemistry": result.chemistry_score, "toxicity": result.toxicity_score}
+    if docking_provided:
+        weights["docking"] = 0.30
+        scores["docking"] = result.docking_score
+    wsum = sum(weights.values())
+    result.composite_score = round(sum(weights[k] * scores[k] for k in weights) / wsum, 1)
 
     result.sub_scores = {
         "chemistry": result.chemistry_score,
-        "docking": result.docking_score,
+        "docking": result.docking_score if docking_provided else None,
         "toxicity": result.toxicity_score,
-        "patient_match": result.patient_match_score,
         "composite": result.composite_score,
     }
 
     # Verdict
     if result.composite_score >= 70 and result.chemistry_score >= 60:
-        result.overall_verdict = "VIABLE LEAD"
+        result.overall_verdict = "MEETS SCREENING THRESHOLDS"
     elif result.composite_score >= 50:
-        result.overall_verdict = "CONDITIONAL - Requires optimization"
+        result.overall_verdict = "PARTIAL - some thresholds not met"
     else:
-        result.overall_verdict = "REJECTED"
+        result.overall_verdict = "BELOW SCREENING THRESHOLDS"
 
     # Generate rationale
     result.rationale = _generate_rationale(result)
@@ -693,10 +588,7 @@ def _generate_recommendations(result: LeadEvaluation) -> list[str]:
         recs.append("Reduce hERG inhibition risk: decrease lipophilicity or add polar groups")
 
     if result.composite_score >= 70:
-        recs.append("Compound is viable for advancing to in vitro enzymatic and cell-based assays")
-
-    if result.patient_match_score > 60:
-        recs.append("Patient-specific molecular profile is favorable for this compound")
+        recs.append("Passes the in-silico screening thresholds; confirm with experiments (enzymatic and cell-based assays) before drawing conclusions")
 
     if not recs:
         recs.append("No specific recommendations at this time")
@@ -723,13 +615,21 @@ def _latin1_safe(text) -> str:
 
 
 class AuditPDF(FPDF):
+    def multi_cell(self, w, h=None, text="", *args, **kwargs):
+        """Always start a wrapped block at the left margin (fixes 'Not enough
+        horizontal space' when the cursor was left at the right edge by cell(new_x='END'))."""
+        self.set_x(self.l_margin)
+        kwargs.setdefault("new_x", "LMARGIN")
+        kwargs.setdefault("new_y", "NEXT")
+        return super().multi_cell(w, h, text, *args, **kwargs)
+
     """Custom PDF class for the lead evaluation audit report."""
 
     def header(self):
         self.set_font("Helvetica", "B", 16)
         self.cell(0, 10, _latin1_safe("OncoAgent-GBM Lead Evaluation Report"), align="C", new_x="LMARGIN", new_y="NEXT")
         self.set_font("Helvetica", "", 9)
-        self.cell(0, 5, _latin1_safe("Automated Lead Viability Audit - Glioblastoma Drug Discovery"), align="C", new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 5, _latin1_safe("In-silico screening report - research use only, not a viability or clinical assessment"), align="C", new_x="LMARGIN", new_y="NEXT")
         self.ln(3)
 
     def footer(self):
@@ -790,9 +690,9 @@ def _build_pdf_report(eval_result: LeadEvaluation) -> bytes:
     pdf.add_page()
 
     # Verdict Banner
-    if "VIABLE" in eval_result.overall_verdict:
+    if "MEETS" in eval_result.overall_verdict:
         pdf.set_fill_color(46, 204, 113)
-    elif "REJECTED" in eval_result.overall_verdict:
+    elif "BELOW" in eval_result.overall_verdict:
         pdf.set_fill_color(231, 76, 60)
     else:
         pdf.set_fill_color(241, 196, 15)
@@ -813,10 +713,9 @@ def _build_pdf_report(eval_result: LeadEvaluation) -> bytes:
 
     # Score Summary
     pdf.section_title("2. Evaluation Scores (Weighted Composite)")
-    pdf.score_bar("Chemistry (30%)", eval_result.chemistry_score)
-    pdf.score_bar("Docking (30%)", eval_result.docking_score)
-    pdf.score_bar("Toxicity Safety (25%)", eval_result.toxicity_score)
-    pdf.score_bar("Patient Match (15%)", eval_result.patient_match_score)
+    pdf.score_bar("Chemistry (40%)", eval_result.chemistry_score)
+    pdf.score_bar("Docking (30%, if provided)", eval_result.docking_score)
+    pdf.score_bar("Structural-alert screen (30%)", eval_result.toxicity_score)
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(55, 7, "COMPOSITE SCORE:", new_x="END")
@@ -839,7 +738,7 @@ def _build_pdf_report(eval_result: LeadEvaluation) -> bytes:
     pdf.ln(2)
 
     # Toxicity Details
-    pdf.section_title("5. Toxicity Assessment (ProTox-3 Inspired)")
+    pdf.section_title("5. Structural-alert screen (heuristic; not a toxicity prediction)")
     tox = eval_result.toxicity_details.get("profile", {})
     if tox:
         pdf.key_value("Ames Mutagenicity", tox.get("ames", "unknown"))
@@ -847,19 +746,12 @@ def _build_pdf_report(eval_result: LeadEvaluation) -> bytes:
         pdf.key_value("Hepatotoxicity", tox.get("hepatotoxicity", "unknown"))
         pdf.key_value("Oral Toxicity", tox.get("oral_tox", "unknown"))
         pdf.key_value("Carcinogenicity", tox.get("carcinogenicity", "unknown"))
-        pdf.key_value("Est. LD50", f"{tox.get('ld50_mg_kg', 0)} mg/kg")
+        pdf.key_value("LD50", "not estimated (use ProTox-3 / experiment)")
         pdf.key_value("Toxicity Class", tox.get("tox_class", "unknown"))
     for k, v in eval_result.toxicity_details.items():
         if k != "profile":
             pdf.key_value(k.replace("_", " ").title(), str(v))
     pdf.ln(2)
-
-    # Patient Match
-    if eval_result.patient_match_details:
-        pdf.section_title("6. Patient Profile Match")
-        for k, v in eval_result.patient_match_details.items():
-            pdf.key_value(k.replace("_", " ").title(), str(v))
-        pdf.ln(2)
 
     # Rationale
     pdf.section_title("7. Evaluation Rationale")
@@ -937,15 +829,15 @@ def _build_docx_report(eval_result: LeadEvaluation) -> bytes:
 
     subtitle = doc.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = subtitle.add_run('Automated Lead Viability Audit - Glioblastoma Drug Discovery')
+    run = subtitle.add_run('In-silico screening report - research use only, not a viability or clinical assessment')
     run.font.size = Pt(11)
     run.font.color.rgb = RGBColor(100, 100, 100)
 
     doc.add_paragraph(f'Generated: {eval_result.timestamp[:19]}')
 
-    if "VIABLE" in eval_result.overall_verdict:
+    if "MEETS" in eval_result.overall_verdict:
         color = RGBColor(46, 204, 113)
-    elif "REJECTED" in eval_result.overall_verdict:
+    elif "BELOW" in eval_result.overall_verdict:
         color = RGBColor(231, 76, 60)
     else:
         color = RGBColor(241, 196, 15)
@@ -966,10 +858,9 @@ def _build_docx_report(eval_result: LeadEvaluation) -> bytes:
     table.style = 'Light Grid Accent 1'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     scores = [
-        ('Chemistry (30%)', f'{eval_result.chemistry_score:.1f}'),
-        ('Docking (30%)', f'{eval_result.docking_score:.1f}'),
-        ('Toxicity Safety (25%)', f'{eval_result.toxicity_score:.1f}'),
-        ('Patient Match (15%)', f'{eval_result.patient_match_score:.1f}'),
+        ('Chemistry (40%)', f'{eval_result.chemistry_score:.1f}'),
+        ('Docking (30%, if provided)', f'{eval_result.docking_score:.1f}'),
+        ('Structural-alert screen (30%)', f'{eval_result.toxicity_score:.1f}'),
         ('COMPOSITE SCORE', f'{eval_result.composite_score:.1f} / 100'),
         ('Verdict', eval_result.overall_verdict),
     ]
@@ -985,7 +876,7 @@ def _build_docx_report(eval_result: LeadEvaluation) -> bytes:
     for k, v in eval_result.docking_details.items():
         doc.add_paragraph(f'{k.replace("_", " ").title()}: {v}')
 
-    doc.add_heading('5. Toxicity Assessment (ProTox-3 Inspired)', level=1)
+    doc.add_heading('5. Structural-alert screen (heuristic; not a toxicity prediction)', level=1)
     tox = eval_result.toxicity_details.get("profile", {})
     if tox:
         tox_table = doc.add_table(rows=len(tox), cols=2)
@@ -994,17 +885,12 @@ def _build_docx_report(eval_result: LeadEvaluation) -> bytes:
         tox_labels = {
             'ames': 'Ames Mutagenicity', 'herg': 'hERG Inhibition Risk',
             'hepatotoxicity': 'Hepatotoxicity', 'oral_tox': 'Oral Toxicity',
-            'carcinogenicity': 'Carcinogenicity', 'ld50_mg_kg': 'Est. LD50 (mg/kg)',
+            'carcinogenicity': 'Carcinogenicity', 'ld50_mg_kg': 'LD50 (mg/kg)',
             'tox_class': 'Toxicity Class',
         }
         for i, (k, v) in enumerate(tox.items()):
             tox_table.rows[i].cells[0].text = tox_labels.get(k, k)
             tox_table.rows[i].cells[1].text = str(v)
-
-    if eval_result.patient_match_details:
-        doc.add_heading('6. Patient Profile Match', level=1)
-        for k, v in eval_result.patient_match_details.items():
-            doc.add_paragraph(f'{k.replace("_", " ").title()}: {v}')
 
     doc.add_heading('7. Evaluation Rationale', level=1)
     doc.add_paragraph(eval_result.rationale)
