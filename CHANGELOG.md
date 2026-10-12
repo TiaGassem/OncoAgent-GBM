@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.4.0 - 2026-10-12
+Rebuilt after user testing (3D view unclear, omics files rejected, redocking confusing).
+### Changed
+- **3D viewer rewritten** (`viewer3d.py`, 3Dmol.js pinned): protein name/PDB ID, pose selector with Vina energies, pocket residues labelled by name+number, dashed distance lines with Å labels (N/O pairs <= 3.5 A), grid box, optional crystal ligand overlay. Spin is off by default. Tables of contacts and distances under the viewer.
+- **Redocking is now automatic** (`redock_auto.py`): upload a PDB with a bound ligand (or an RCSB ID), pick the ligand, press run. Extracts and removes the ligand, builds the box, docks with 1-3 seeds, reports top-pose and best-pose RMSD, shows crystal-vs-docked overlay. Manual PDBQT pasting moved to an "Advanced" expander.
+- **Omics inputs are forgiving** (`omics_io.py`): CSV/TSV/TXT/XLSX, auto-detects genes-in-rows vs samples-in-rows, averages duplicate genes, drops text columns, fuzzy sample-name matching, name-rule groups, and tells the user exactly what it understood and what is wrong. Templates + simulated demo data (clearly labelled) + plain-language help.
+- Streamlit pinned to the tested 1.65.x; HTML views use `st.iframe` with a fallback (`components.html` is deprecated).
+### Verified
+- Real redocking of imatinib/Abl from a plain PDB complex through the wizard: top-pose RMSD 0.90 A with two seeds, clicked through in the running app.
+- Demo omics run recovers all 4 planted genes across 8 random seeds; fresh venv from requirements.txt passes 34 tests.
+### Not verified
+- Viewer rendering in a real browser (JS validated with node against a stub only). Open `demo_redocking_viewer_1IEP.html` to check.
+
 ## 2.3.0 - 2026-10-11
 ### Added
 - **Omics & Tools tab** (labels in EN/FR/AR): differential expression (Welch / Mann-Whitney + Benjamini-Hochberg FDR, volcano, PCA), gene-set over-representation from a GMT file, single-gene co-expression, on user-uploaded tables.

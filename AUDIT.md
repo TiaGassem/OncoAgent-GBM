@@ -35,3 +35,8 @@ PDF and DOCX report export produce valid files, redocking RMSD handles PDBQT pol
 - H-bond 'candidates' use distance only (no angle/donor-acceptor typing). PAINS/Brenk flags are warnings, not proof.
 - Not hosted (needs GPU/servers): structure prediction, protein design, generative models. Resources tab links to the originals.
 - FR/AR text is limited to tab labels and the Statistics tab; it needs native-speaker review.
+
+## v2.4.0 notes
+- 3D viewer: JavaScript syntax-checked and exercised against a stubbed 3Dmol (correct labels/lines/box calls for real 1IEP data); NOT yet seen rendering in a browser by the author of this audit.
+- Redocking: validated on 1IEP only, with ligand coordinates from a public example. Needs RCSB download (internet) and OpenBabel + Vina on the server.
+- Omics: statistical core cross-checked against SciPy; loaders tested on synthetic messy layouts, not yet on real TCGA/CGGA/GEO exports. Send failing files' first rows + the error text so the loader can be fixed.

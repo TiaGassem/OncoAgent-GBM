@@ -35,17 +35,20 @@ def ligand_contacts(protein_pdb: str, ligand_pdb: str, cutoff: float = 4.0, hbon
         raise ValueError("could not read heavy atoms from protein and/or ligand")
     P = np.array([a["xyz"] for a in prot]); L = np.array([a["xyz"] for a in lig])
     D = np.linalg.norm(P[:, None, :] - L[None, :, :], axis=2)
-    contacts, hb = {}, []
+    contacts, hb, anchor = {}, [], {}
     for i, a in enumerate(prot):
         j = int(D[i].argmin())
         if D[i, j] <= cutoff:
             key = (a["chain"], a["resseq"], a["resname"])
             contacts[key] = min(contacts.get(key, 99.0), float(D[i, j]))
+            if a["name"] == "CA" or key not in anchor:
+                anchor[key] = a["xyz"]
         for j2 in np.where(D[i] <= hbond_cutoff)[0]:
             if a["elem"] in ("N", "O") and lig[j2]["elem"] in ("N", "O"):
                 hb.append({"residue": f"{a['resname']}{a['resseq']}{a['chain']}", "protein_atom": a["name"],
-                           "ligand_atom": lig[j2]["name"] or lig[j2]["elem"], "distance_A": round(float(D[i, j2]), 2)})
-    res = [{"chain": c, "resseq": r, "resname": n, "min_distance_A": round(d, 2)}
+                           "ligand_atom": lig[j2]["name"] or lig[j2]["elem"], "distance_A": round(float(D[i, j2]), 2),
+                           "p_xyz": a["xyz"], "l_xyz": lig[j2]["xyz"]})
+    res = [{"chain": c, "resseq": r, "resname": n, "min_distance_A": round(d, 2), "xyz": anchor[(c, r, n)]}
            for (c, r, n), d in sorted(contacts.items(), key=lambda kv: (kv[0][0], kv[0][1]))]
     return res, hb
 
@@ -62,3 +65,48 @@ def plddt_summary(pdb_text: str) -> dict:
             "confident_70_90": round(float(((ca > 70) & (ca <= 90)).mean()), 3),
             "low_50_70": round(float(((ca > 50) & (ca <= 70)).mean()), 3),
             "very_low_<=50": round(float((ca <= 50).mean()), 3)}
+
+
+_AD_TO_ELEM = {"A": "C", "C": "C", "N": "N", "NA": "N", "NS": "N", "OA": "O", "OS": "O", "O": "O",
+               "SA": "S", "S": "S", "HD": "H", "HS": "H", "H": "H", "F": "F", "P": "P",
+               "CL": "Cl", "BR": "Br", "I": "I", "FE": "Fe", "ZN": "Zn", "MG": "Mg", "MN": "Mn", "CA": "Ca"}
+
+
+def split_pdbqt_poses(text: str) -> list:
+    """Split a Vina multi-pose PDBQT into [{'energy': float|None, 'pdb': str}], with correct elements."""
+    poses, cur, energy = [], [], None
+    for ln in text.splitlines():
+        if ln.startswith("REMARK VINA RESULT"):
+            try:
+                energy = float(ln.split()[3])
+            except (IndexError, ValueError):
+                energy = None
+        elif ln.startswith(("ATOM", "HETATM")):
+            t = ln[77:79].strip().upper() if len(ln) >= 79 else ""
+            el = _AD_TO_ELEM.get(t, t[:1] or ln[12:16].strip()[:1])
+            core = ln[:54].ljust(54) + "  1.00  0.00          " + el.rjust(2)
+            cur.append("HETATM" + core[6:])
+        elif ln.startswith("ENDMDL"):
+            if cur:
+                poses.append({"energy": energy, "pdb": "\n".join(cur) + "\n"})
+            cur, energy = [], None
+    if cur:
+        poses.append({"energy": energy, "pdb": "\n".join(cur) + "\n"})
+    return poses
+
+
+def pdb_title(text: str) -> dict:
+    """Protein name / PDB ID / title from header records (best effort)."""
+    out = {"pdb_id": "", "molecule": "", "title": "", "classification": ""}
+    mols, title = [], []
+    for ln in text.splitlines():
+        if ln.startswith("HEADER"):
+            out["classification"] = ln[10:50].strip().title()
+            out["pdb_id"] = ln[62:66].strip()
+        elif ln.startswith("COMPND") and "MOLECULE:" in ln:
+            mols.append(ln.split("MOLECULE:")[1].strip().rstrip(";").strip())
+        elif ln.startswith("TITLE"):
+            title.append(ln[10:].strip())
+    out["molecule"] = "; ".join(dict.fromkeys(mols))
+    out["title"] = " ".join(title)
+    return out

@@ -1130,28 +1130,30 @@ def tab_docking():
         })
 
         if result.ligand_pdbqt:
-            st.markdown("**3D Visualization**")
+            st.markdown("**3D view and interactions**")
             try:
-                import py3Dmol
                 import streamlit.components.v1 as components
-
-                viewer = py3Dmol.view(width=700, height=500)
+                import viewer3d
                 with open(receptor_pdb, "r") as f:
                     receptor_data = f.read()
-                viewer.addModel(receptor_data, "pdb")
-                viewer.setStyle({"model": -1}, {"cartoon": {"color": "white", "opacity": 0.7}})
-                viewer.addModel(result.ligand_pdbqt, "pdbqt")
-                viewer.setStyle({"model": -1}, {"stick": {"colorscheme": "greenCarbon", "radius": 0.15}})
-                viewer.addBox({
-                    "center": {"x": final_grid.center_x, "y": final_grid.center_y, "z": final_grid.center_z},
-                    "dimensions": {"w": final_grid.size_x, "h": final_grid.size_y, "d": final_grid.size_z},
-                    "color": "cyan", "opacity": 0.2, "wireframe": True,
-                })
-                viewer.zoomTo()
-                viewer.spin(True)
-                components.html(viewer._make_html(), height=520)
-            except ImportError:
-                st.warning("py3Dmol not installed. Run: pip install py3Dmol")
+                grid_dict = {"center": {"x": final_grid.center_x, "y": final_grid.center_y, "z": final_grid.center_z},
+                             "size": {"x": final_grid.size_x, "y": final_grid.size_y, "z": final_grid.size_z}}
+                _pid = st.session_state.get("pdb_id", "") or ""
+                html = viewer3d.build_viewer_html(receptor_data, result.ligand_pdbqt, grid_dict,
+                                                  title=f"Receptor {_pid}".strip(), pdb_id=_pid)
+                viewer3d.show_html(html, 700)
+                _payload = viewer3d.prepare_payload(receptor_data, result.ligand_pdbqt, grid_dict)
+                _p1 = _payload["poses"][0]
+                st.caption(f"Tables for {_p1['name']} (the top-ranked pose). Distances are measured between the actual atoms.")
+                t1, t2 = st.columns(2)
+                t1.markdown("**Pocket residues (heavy atom within 4.0 Å of the ligand)**")
+                t1.dataframe(pd.DataFrame([{k: v for k, v in c.items() if k != "xyz"} for c in _p1["contacts"]]),
+                             use_container_width=True, hide_index=True)
+                t2.markdown("**Candidate H-bonds (N/O pairs ≤ 3.5 Å, distance only)**")
+                t2.dataframe(pd.DataFrame([{k: v for k, v in h.items() if k not in ("p_xyz", "l_xyz")} for h in _p1["hbonds"]]),
+                             use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.warning(f"3D view unavailable: {e}")
 
         st.markdown("---")
         st.markdown('<div class="section-header">Export Docking Results</div>', unsafe_allow_html=True)
@@ -2346,7 +2348,7 @@ def tab_citations():
     )
 
 
-def tab_validation():
+def _manual_validation():
     st.markdown('<div class="section-header">Docking validation \u2014 redocking RMSD</div>',
                 unsafe_allow_html=True)
     st.caption(
@@ -2398,6 +2400,97 @@ def tab_validation():
         st.caption("\u26a0\ufe0f " + res.note + " Report the RMSD honestly, including "
                    "cases that FAIL \u2014 a failed redock is a real, informative result, "
                    "not something to hide.")
+
+
+def tab_validation():
+    import redock_auto as ra
+    st.markdown('<div class="section-header">Docking validation: redocking test</div>', unsafe_allow_html=True)
+    st.markdown(
+        "**What this test does, in plain words.** A crystal structure shows where a drug really sits in its protein. "
+        "This test takes such a structure, **pulls the drug out, and asks the docking program to put it back** "
+        "without cheating. Then it measures how far the predicted position is from the real one "
+        "(**RMSD**, in Å: 0 = identical).\n\n"
+        "- **RMSD ≤ 2.0 Å = pass**: your docking set-up can reproduce reality for this protein.\n"
+        "- **> 2.0 Å = fail**: do not trust docking scores for this target without changing the set-up.\n\n"
+        "You do **not** paste PDBQT text here: upload a PDB that already contains the protein **and** its bound drug."
+    )
+    est = engine_status()
+    if not est["can_dock"] or not est["openbabel"]:
+        st.error("This server cannot run real docking (AutoDock Vina and/or OpenBabel missing), so the automatic test "
+                 "is disabled. See the Molecular Docking tab for the fix.")
+    src = st.radio("Structure source", ["Upload .pdb", "RCSB PDB ID"], horizontal=True, key="rd_src")
+    pdb_text = ""
+    if src == "Upload .pdb":
+        f = st.file_uploader("PDB file with protein + bound ligand", type=["pdb", "ent"], key="rd_file")
+        if f:
+            pdb_text = f.getvalue().decode("utf-8", "ignore")
+    else:
+        pid = st.text_input("PDB ID (4 characters, e.g. 1IEP)", key="rd_pid").strip().upper()
+        if len(pid) == 4 and st.button("Download from RCSB", key="rd_dl"):
+            try:
+                import requests
+                r = requests.get(f"https://files.rcsb.org/download/{pid}.pdb", timeout=30)
+                r.raise_for_status()
+                st.session_state["rd_pdb_text"] = r.text
+                st.session_state["rd_pdb_id"] = pid
+            except Exception as e:
+                st.error(f"Download failed: {e}")
+        pdb_text = st.session_state.get("rd_pdb_text", "")
+    if pdb_text:
+        ligs = ra.list_ligands(pdb_text)
+        if not ligs:
+            st.warning("No drug-like ligand found in this file (water, ions and buffers are ignored). "
+                       "Use a structure solved with a bound inhibitor.")
+        else:
+            labels = [f"{l['resname']} chain {l['chain']} #{l['resseq']} ({l['heavy_atoms']} heavy atoms)" for l in ligs]
+            k = st.selectbox("Which ligand to redock?", range(len(ligs)), format_func=lambda i: labels[i], key="rd_lig")
+            c1, c2 = st.columns(2)
+            nseeds = c1.slider("Random seeds (repeats)", 1, 3, 2, key="rd_seeds",
+                               help="Each seed is an independent docking run. 2-3 shows reproducibility. About 1-3 min each.")
+            exh = c2.select_slider("Exhaustiveness (search effort)", [8, 16, 32], 8, key="rd_exh")
+            if st.button("Run automatic redocking", type="primary", key="rd_run"):
+                L = ligs[k]
+                with st.spinner("Docking... this takes a few minutes. Please keep this page open."):
+                    try:
+                        st.session_state["rd_result"] = ra.run_redock(
+                            pdb_text, L["resname"], L["chain"], L["resseq"],
+                            seeds=(42, 7, 11)[:nseeds], exhaustiveness=exh)
+                        st.session_state["rd_pid_label"] = st.session_state.get("rd_pdb_id", "")
+                    except Exception as e:
+                        st.session_state.pop("rd_result", None)
+                        st.error(f"Redocking could not run: {e}")
+    res = st.session_state.get("rd_result")
+    if res:
+        v = res["verdict"]
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Passes (top pose ≤ 2.0 Å)", f"{res['n_pass']} / {res['n_seeds']}")
+        m2.metric("Mean top-pose RMSD", f"{res['mean_top_rmsd']:.2f} Å")
+        m3.metric("Ligand", res["ligand"])
+        (st.success if v == "PASS" else st.warning if v == "PARTIAL" else st.error)(
+            {"PASS": "PASS: every run reproduced the crystal pose within 2.0 Å.",
+             "PARTIAL": "PARTIAL: some runs reproduced the crystal pose and some did not. Docking is unreliable here.",
+             "FAIL": "FAIL: the crystal pose was not reproduced. Do not trust docking scores for this set-up."}[v])
+        st.dataframe(pd.DataFrame(res["runs"]).rename(columns={
+            "seed": "Seed", "top_pose_energy": "Top pose energy (kcal/mol)", "top_pose_rmsd": "Top pose RMSD (Å)",
+            "best_pose_rmsd": "Best of all poses RMSD (Å)", "best_pose_rank": "Rank of that pose"}),
+            use_container_width=True, hide_index=True)
+        st.caption("Top-pose RMSD tests whether the **scoring** ranks the right pose first (the standard pass/fail). "
+                   "Best-pose RMSD tests whether the **search** found it at all. The box was centred on the crystal "
+                   f"ligand (size {res['grid']['size']['x']:.0f}×{res['grid']['size']['y']:.0f}×{res['grid']['size']['z']:.0f} Å).")
+        try:
+            import streamlit.components.v1 as components
+            import viewer3d
+            viewer3d.show_html(viewer3d.build_viewer_html(res["receptor_pdb"], res["poses_pdbqt"], res["grid"],
+                                                       reference_pdb_block=res["reference_pdb"],
+                                                       title=f"Redocking of {res['ligand']}",
+                                                       pdb_id=st.session_state.get("rd_pid_label", "")), 700)
+            st.caption("Orange = real (crystal) ligand. Green = redocked pose. If they overlap, the test passed.")
+        except Exception as e:
+            st.warning(f"3D view unavailable: {e}")
+        st.warning("Limits: RMSD has no symmetry correction; ligand bonds are perceived by OpenBabel; passing on one "
+                   "protein does not prove docking is valid for another target. Report failures honestly.")
+    with st.expander("Advanced: compare two poses manually (PDB/PDBQT text)"):
+        _manual_validation()
 
 
 def _nb_store() -> list:

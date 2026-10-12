@@ -46,7 +46,7 @@ It is a responsive web app: open the link on any device. To get an app-like icon
 "Add to Home Screen" (iOS Safari / Android Chrome) or "Install this site as an app"
 (Chrome/Edge on Windows/Mac). No app store, research use only.
 
-## Status (v2.3.0)
+## Status (v2.4.0)
 Research prototype with automated tests (`pytest -q`, run in CI). See `CHANGELOG.md` for what changed and
 `AUDIT.md` for what is verified and what is still open. Invented numbers (LD50 estimates, patient matching,
 "viable lead" verdicts, credibility scores) were removed in 2.1. Docking with Vina/OpenBabel and the live API
@@ -125,7 +125,7 @@ or therapeutic use.
 
 
 ## Tests and contributing
-`pip install -r requirements-dev.txt && pytest -q` (26 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
+`pip install -r requirements-dev.txt && pytest -q` (34 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
 statistics against textbook values, headless app load). Issues and pull requests are welcome; every scientific
 claim added must carry a DOI/PMID or be labelled "author convention".
 
