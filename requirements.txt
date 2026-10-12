@@ -1,7 +1,7 @@
 # Runtime dependencies. Ranges are bounded to avoid surprise major-version breaks.
 # Vina and OpenBabel are system binaries: see packages.txt (Streamlit Cloud) / Dockerfile.
 # For a fully reproducible environment, generate a lock file:  pip freeze > requirements.lock
-streamlit>=1.32,<2
+streamlit>=1.65.0,<1.66   # tested version; newer releases removed/changed APIs this app uses
 rdkit>=2024.3.1
 pydantic>=2.0,<3
 pandas>=2.0,<3
