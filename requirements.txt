@@ -19,4 +19,3 @@ matplotlib>=3.7
 spacy>=3.7,<4
 py3Dmol>=2.0
 gemmi>=0.6
-vina>=1.2.5

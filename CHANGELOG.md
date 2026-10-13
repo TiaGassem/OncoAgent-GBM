@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.1 - 2026-10-13
+### Fixed (app stuck on "Your app is in the oven" on Streamlit Cloud)
+- `.streamlit/config.toml` (active since 2.2.0, previously ignored at repo root) set `server.port`, `server.address` and `headless`; Streamlit Cloud manages these itself and overriding them can leave the app stuck on startup. Removed (the Dockerfile still passes them on its command line).
+- Removed the extra `vina` pip dependency (could fail to install on some Python versions); Vina comes from `packages.txt` (`autodock-vina`), and the app reports clearly if it is missing.
+### Verified
+- Server starts and answers its health check in a clean venv built from requirements.txt.
+- Redocking passes through the command-line Vina path as well (0.90 A, same as the Python path), tested with Vina 1.2.5. Debian's apt package may be an older Vina; not tested.
+
 ## 2.4.0 - 2026-10-12
 Rebuilt after user testing (3D view unclear, omics files rejected, redocking confusing).
 ### Changed
