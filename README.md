@@ -125,9 +125,15 @@ or therapeutic use.
 
 
 ## Tests and contributing
-`pip install -r requirements-dev.txt && pytest -q` (34 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
+`pip install -r requirements-dev.txt && pytest -q` (35 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
 statistics against textbook values, headless app load). Issues and pull requests are welcome; every scientific
 claim added must carry a DOI/PMID or be labelled "author convention".
 
 ## Cite
 See `CITATION.cff`. Add the Zenodo DOI after your first release (see `PUBLISHING.md`).
+
+
+## How to cite
+If you use OncoAgent-GBM, please cite it using `CITATION.cff` (GitHub "Cite this repository") and the Zenodo DOI of the
+release you used. The licence (MIT) requires keeping the copyright notice; citation is the academic norm and is requested,
+not legally enforceable by the licence.

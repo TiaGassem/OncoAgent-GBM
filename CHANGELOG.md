@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0 - 2026-10-14
+### Fixed
+- **Startup crash/stall on Python 3.13**: `numpy<2` forced a from-source numpy build (no wheels). Cap removed; verified install + all tests on Python 3.11 and 3.13 using `uv` (Streamlit Cloud's installer). Removed an inline comment from `requirements.txt`.
+- One failing tab can no longer take down the whole app (`_safe_tab`).
+- **PDF chat**: long unpunctuated text (CVs, tables) is cut into short windows; added domain terms (cell lines, docking software). On a real CV PDF the chat now returns the U251/U87 cell lines and Vina/AutoDock4/PLANTS with page numbers.
+### Changed
+- LICENSE holder set to Tasnim Gassem; added NOTICE and "How to cite".
+
 ## 2.4.1 - 2026-10-13
 ### Fixed (app stuck on "Your app is in the oven" on Streamlit Cloud)
 - `.streamlit/config.toml` (active since 2.2.0, previously ignored at repo root) set `server.port`, `server.address` and `headless`; Streamlit Cloud manages these itself and overriding them can leave the app stuck on startup. Removed (the Dockerfile still passes them on its command line).

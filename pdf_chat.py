@@ -74,7 +74,25 @@ def _split_sentences(text: str) -> list[str]:
         return []
     # Split on sentence end followed by capital/space; avoid splitting e.g. 'et al.'
     parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text)
-    return [p.strip() for p in parts if len(p.strip()) > 25]
+    out = []
+    for p in parts:
+        p = p.strip()
+        if len(p) <= 25:
+            continue
+        # PDF text often lacks full stops (CVs, tables, lists): cut long runs into
+        # overlapping ~260-character windows on word boundaries so quotes stay short and precise.
+        if len(p) > 320:
+            words, cur = p.split(" "), ""
+            for w in words:
+                if len(cur) + len(w) + 1 > 260 and cur:
+                    out.append(cur.strip())
+                    cur = " ".join(cur.split(" ")[-8:]) + " "
+                cur += w + " "
+            if len(cur.strip()) > 25:
+                out.append(cur.strip())
+        else:
+            out.append(p)
+    return out
 
 
 # ------------------------------------------------------------------
@@ -87,6 +105,10 @@ def _split_sentences(text: str) -> list[str]:
 # down-weighted so exact author wording always ranks first.
 GBM_SYNONYMS: dict[str, list[str]] = {
     "cdc25": ["cdc25a", "cdc25b", "cdc25c", "phosphatase", "dual-specificity"],
+    "lines": ["u251", "u87", "u251-mg", "u87-mg", "t98g", "ln229", "a172", "cells", "cell"],
+    "software": ["vina", "autodock", "autodock4", "plants", "openmm", "ambertools", "rdkit", "python", "graphpad"],
+    "tools": ["vina", "autodock", "autodock4", "plants", "openmm", "ambertools", "rdkit", "mdanalysis"],
+    "docking": ["vina", "autodock", "autodock4", "plants", "covalent", "noncovalent", "binding"],
     "glioblastoma": ["gbm", "glioma", "astrocytoma", "glial", "neuro-oncology"],
     "overexpressed": ["overexpression", "upregulated", "elevated", "increased", "higher"],
     "prognosis": ["survival", "outcome", "mortality", "malignancy", "aggressiveness"],

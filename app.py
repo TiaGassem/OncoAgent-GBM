@@ -816,6 +816,15 @@ def render_docking_fallback(ligand_smiles: str, isoform_choice: str,
                "(swissdock.ch) and CB-Dock2 (cadd.labshare.cn/cb-dock2).")
 
 
+def _safe_tab(fn, *args):
+    """A failure inside one tab must never take down the whole app: show it here instead."""
+    try:
+        fn(*args)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"This section hit an error and was stopped: {type(e).__name__}: {e}. "
+                 "The rest of the app still works. Please report it with the text above.")
+
+
 def tab_docking():
     st.markdown('<div class="section-header">Targeted Molecular Docking</div>', unsafe_allow_html=True)
 
@@ -2796,10 +2805,10 @@ def main():
     with tab1:
         tab_compound_screening()
     with tab2:
-        tab_docking()
+        _safe_tab(tab_docking)
     with tab_val:
         if HAS_VALIDATION:
-            tab_validation()
+            _safe_tab(tab_validation)
         else:
             st.warning("Validation module unavailable in this deployment.")
     with tab3:
@@ -2810,10 +2819,10 @@ def main():
         tab_kinetics()
     with tab_stat:
         from stats_tab import tab_statistics
-        tab_statistics(lang_choice)
+        _safe_tab(tab_statistics, lang_choice)
     with tab_omics:
         from analysis_tab import tab_analysis
-        tab_analysis(lang_choice)
+        _safe_tab(tab_analysis, lang_choice)
     with tab_cite:
         tab_citations()
     with tab5:
