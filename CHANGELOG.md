@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.8.0 - 2026-10-14
+- **Real conversational guide** (`guide_bot.py`): type anything; it answers questions about the app and concepts (RMSD, FDR, log-rank, IC50, Vina score, seeds, citing, why results differ), asks follow-up questions, remembers context, builds an ordered step-by-step plan, offers sample files, refuses medical-advice requests. Rule-based: no LLM, nothing invented. Replaces the button-only guide.
+
 ## 2.7.1 - 2026-10-14
 - Clarified everywhere: docking and all tools run on ANY protein, drug or cell line the user provides; the repo only *shows* one validation test case (imatinib/Abl), and users validate their own target with Docking Validation.
 - Verified: temozolomide (SMILES) goes through the same SMILES→3D→Vina pipeline (technical test only; no biological claim). Promo video: docking slide now uses temozolomide as the example input, with RDKit-computed properties and no invented score.

@@ -1,5 +1,6 @@
 """Short, scannable in-app guides: why / what you need / steps / expect / don't / if it fails.
 Text describes only behaviour that exists in the app. Research and education only."""
+import re
 import streamlit as st
 
 G = {
@@ -138,32 +139,31 @@ def _show_result(k):
 
 
 def _guide_chat():
+    import guide_bot as gb
     ss = st.session_state
-    ss.setdefault("gc_node", "root")
-    q = st.chat_input("Or type what you want in your own words (e.g. 'I want to dock a drug')", key="gc_text")
+    ss.setdefault("gb_hist", [("assistant", gb.OPENER)]); ss.setdefault("gb_ctx", {}); ss.setdefault("gb_sug", gb.START)
+
+    def send(text):
+        ss["gb_hist"].append(("user", text))
+        md, ss["gb_ctx"], ss["gb_sug"] = gb.respond(text, ss["gb_ctx"])
+        ss["gb_hist"].append(("assistant", md))
+    for i, (role, md) in enumerate(ss["gb_hist"]):
+        with st.chat_message(role):
+            files = None
+            m = re.search(r"\[\[DL:([a-z,]+)\]\]", md)
+            if m:
+                files, md = m.group(1).split(","), re.sub(r"\s*\[\[DL:[a-z,]+\]\]", "", md)
+            st.markdown(md)
+            if files and i == len(ss["gb_hist"]) - 1:
+                st.caption("Sample files to practise with:")
+                _dl(files)
+    cols = st.columns(len(ss["gb_sug"]) if ss["gb_sug"] else 1)
+    for j, sug in enumerate(ss["gb_sug"] or []):
+        if cols[j].button(sug, key=f"gb_s{len(ss['gb_hist'])}_{j}"):
+            send(sug); st.rerun()
+    q = st.chat_input("Type your question or goal here (e.g. 'I am lost', 'what is RMSD?')", key="gb_input")
     if q:
-        low = q.lower()
-        hit = next((k for k, ws in KEYWORDS.items() if any(w in low for w in ws)), None)
-        ss["gc_node"] = hit or "none"
-        ss["gc_note"] = None if hit else "I did not recognise that, so here are the common starting points."
-    node = ss["gc_node"]
-    with st.chat_message("assistant"):
-        if node in R:
-            _show_result(node)
-        else:
-            if ss.get("gc_note"):
-                st.caption(ss["gc_note"])
-            qn, opts = TREE[node]
-            st.markdown(f"**{qn}**")
-            cols = st.columns(len(opts) if len(opts) <= 3 else 3)
-            for i, (lab, nxt) in enumerate(opts):
-                if cols[i % len(cols)].button(lab, key=f"gc_{node}_{nxt}"):
-                    ss["gc_node"] = nxt if nxt in TREE or nxt in R else "root"
-                    ss["gc_note"] = None
-                    st.rerun()
-    if node != "root" and st.button("↩ Start over", key="gc_reset"):
-        ss["gc_node"] = "root"
-        st.rerun()
+        send(q); st.rerun()
 
 
 def start_here():
