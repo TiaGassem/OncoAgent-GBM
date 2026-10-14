@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.6.0 - 2026-10-14
+### Added
+- In-app **30-second guide** on every main tab (why / need / steps / expect / don't / if it fails) and a **Start here** goal picker.
+- `docs/PROMOTION_KIT.md` (free publishing route, LinkedIn posts, pitch lines, tutorial script) and a graphical abstract.
+
 ## 2.5.0 - 2026-10-14
 ### Fixed
 - **Startup crash/stall on Python 3.13**: `numpy<2` forced a from-source numpy build (no wheels). Cap removed; verified install + all tests on Python 3.11 and 3.13 using `uv` (Streamlit Cloud's installer). Removed an inline comment from `requirements.txt`.

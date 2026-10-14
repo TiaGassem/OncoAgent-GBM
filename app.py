@@ -13,6 +13,7 @@ import tempfile
 from datetime import datetime
 
 import streamlit as st
+from guides import render_guide, start_here
 from reference_compounds import GBM_REFERENCE_SMILES
 from explorer_tab import tab_data_explorer, tab_limitations
 import pandas as pd
@@ -2793,6 +2794,7 @@ def main():
                    "it is installed.")
     render_sidebar_chat()
 
+    start_here()
     tab_pdfchat, tab1, tab2, tab_val, tab3, tab4, tab_ic50, tab_stat, tab_omics, tab_cite, tab5, tab_nb, tab_lim = st.tabs([
         "Chat with Papers", T["tab1"], T["tab2"], "Docking Validation",
         T["tab3"], T["tab4"],
@@ -2801,33 +2803,44 @@ def main():
     ])
 
     with tab_pdfchat:
+        render_guide("chat_pdf")
         tab_pdf_chat()
     with tab1:
+        render_guide("screen")
         tab_compound_screening()
     with tab2:
+        render_guide("dock")
         _safe_tab(tab_docking)
     with tab_val:
+        render_guide("validate")
         if HAS_VALIDATION:
             _safe_tab(tab_validation)
         else:
             st.warning("Validation module unavailable in this deployment.")
     with tab3:
+        render_guide("lit")
         tab_research()
     with tab4:
+        render_guide("live")
         tab_data_explorer()
     with tab_ic50:
+        render_guide("ic50")
         tab_kinetics()
     with tab_stat:
+        render_guide("stats")
         from stats_tab import tab_statistics
         _safe_tab(tab_statistics, lang_choice)
     with tab_omics:
+        render_guide("omics")
         from analysis_tab import tab_analysis
         _safe_tab(tab_analysis, lang_choice)
     with tab_cite:
         tab_citations()
     with tab5:
+        render_guide("assistant")
         tab_chat_assistant()
     with tab_nb:
+        render_guide("notebook")
         tab_lab_notebook()
     with tab_lim:
         tab_limitations()
