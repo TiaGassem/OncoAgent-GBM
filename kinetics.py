@@ -128,7 +128,7 @@ def fit_4pl(doses: List[float], responses: List[float]) -> FitResult:
     res.bottom = round(d, 4)
     res.top = round(a, 4)
     res.hill_slope = round(b, 4)
-    res.ic50 = round(c, 6)
+    res.ic50 = float(f"{c:.4g}")  # 4 significant figures (molar values stay readable)
     res.r_squared = round(r2, 4)
     res.ic50_in_range = bool(np.min(x) <= c <= np.max(x))
     res.x_data = [float(v) for v in x]

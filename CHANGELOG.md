@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.7.1 - 2026-10-14
+- Clarified everywhere: docking and all tools run on ANY protein, drug or cell line the user provides; the repo only *shows* one validation test case (imatinib/Abl), and users validate their own target with Docking Validation.
+- Verified: temozolomide (SMILES) goes through the same SMILES→3D→Vina pipeline (technical test only; no biological claim). Promo video: docking slide now uses temozolomide as the example input, with RDKit-computed properties and no invented score.
+
+## 2.7.0 - 2026-10-14
+### Added
+- **Guided "I am lost" chat**: buttons or free text lead to the right tab with steps, caveats and **downloadable sample files** (simulated expression, textbook survival, simulated docking scores) so nobody is blocked by having no data. In-app trust map.
+- `docs/CREDIBILITY.md` (what each tool is validated for, why docking scores differ from other set-ups, how to reproduce thesis docking) and `docs/CONFERENCE_PITCH.md`.
+### Fixed
+- IC50 display rounded molar values to 0.0 (now 4 significant figures); fit accuracy tested in µM and M.
+
 ## 2.6.0 - 2026-10-14
 ### Added
 - In-app **30-second guide** on every main tab (why / need / steps / expect / don't / if it fails) and a **Start here** goal picker.

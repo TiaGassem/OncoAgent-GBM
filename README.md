@@ -125,7 +125,7 @@ or therapeutic use.
 
 
 ## Tests and contributing
-`pip install -r requirements-dev.txt && pytest -q` (36 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
+`pip install -r requirements-dev.txt && pytest -q` (39 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
 statistics against textbook values, headless app load). Issues and pull requests are welcome; every scientific
 claim added must carry a DOI/PMID or be labelled "author convention".
 

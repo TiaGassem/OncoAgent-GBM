@@ -64,9 +64,112 @@ def render_guide(key: str):
         c3.info(f"**If it fails**\n\n{g['fails']}")
 
 
+# ---------------- trust map ----------------
+CRED = [
+ ("Docking (AutoDock Vina)", "Real engine; works on ANY protein and ligand you provide. Evidence shown here: redocking test case imatinib/Abl (0.90 Å). Validate each new protein yourself (Docking Validation) when a crystal ligand exists.", "Cite Vina (Trott & Olson 2010; Eberhardt 2021). Report receptor/ligand preparation, box, exhaustiveness, seeds."),
+ ("Redocking test", "Standard method (RMSD ≤ 2 Å).", "A pass supports the set-up for that protein; it does not prove scores for new ligands."),
+ ("Survival / enrichment statistics", "Log-rank matches the Freireich textbook result (16.79); AUC/EF unit-tested.", "Report n and number of events."),
+ ("Omics (differential expression)", "Welch test + BH-FDR cross-checked against SciPy. Exploratory.", "Not DESeq2/edgeR: use those for raw counts."),
+ ("Compound alerts (PAINS/Brenk)", "RDKit's published catalogues.", "Warnings only, never proof of assay interference."),
+ ("ADME / BOILED-Egg / toxicity screen", "Local approximation (RDKit descriptors, structural alerts). NOT identical to SwissADME or ProTox-3 and not validated against them.", "For papers, use SwissADME / ProTox-3 and cite them."),
+ ("IC50 fit (4PL)", "Recovers known parameters on simulated data (tested).", "Needs points on both plateaus; report R² and n."),
+ ("PDF chat", "Returns verbatim quotes with page numbers; cannot invent text.", "Quote the paper, not the app."),
+ ("AI assistant / curated notes", "Partly unverified text; says so when nothing validated is found.", "Open the cited PMID/DOI before using a claim."),
+ ("Live databases", "Adapters written, not tested at scale.", "Record source and date."),
+ ("Target fishing / bioactivity prediction", "NOT built in.", "Use SwissTargetPrediction or PLATO, then verify in ChEMBL; cite them."),
+]
+
+# ---------------- sample files (so nobody is blocked by 'I have no data') ----------------
+def sample_files():
+    import numpy as np
+    import omics_io as oio
+    X, g = oio.demo_dataset()
+    gr = "sample,group\n" + "\n".join(f"{s},{v}" for s, v in g.items()) + "\n"
+    mp = [6,6,6,6,7,9,10,10,11,13,16,17,19,20,22,23,25,32,32,34,35]; me = [1,1,1,0,1,0,1,0,0,1,1,0,0,0,1,1,0,0,0,0,0]
+    ct = [1,1,2,2,3,4,4,5,5,8,8,8,8,11,11,12,12,15,17,22,23]
+    surv = "time,event,group\n" + "".join(f"{t},{e},6-MP\n" for t, e in zip(mp, me)) + "".join(f"{t},1,control\n" for t in ct)
+    rng = np.random.default_rng(3)
+    enr = "score,label\n" + "".join(f"{v:.2f},1\n" for v in rng.normal(-9, 1, 30)) + "".join(f"{v:.2f},0\n" for v in rng.normal(-7, 1, 300))
+    return {"expression": ("SIMULATED expression table", X.to_csv(), "demo_expression.csv"), "groups": ("Group labels for it", gr, "demo_groups.csv"),
+            "survival": ("Real textbook survival data (Freireich 1963, leukaemia, not GBM)", surv, "freireich_survival.csv"),
+            "enrichment": ("SIMULATED docking scores (30 actives, 300 decoys)", enr, "demo_enrichment.csv")}
+
+
+def _dl(keys):
+    sf = sample_files()
+    for k in keys:
+        lab, txt, fn = sf[k]
+        st.download_button(f"⬇ {lab}", txt, fn, key=f"dl_{k}_{fn}")
+
+
+R = {
+ "pdf": ("Chat with Papers", ["Upload your PDFs.", "Ask with the paper's own words.", "Click the cited page to verify."], None, None),
+ "ic50": ("4PL IC50 Fit", ["Type concentration,response pairs (one per line).", "Use at least 6 concentrations spanning the whole curve.", "Check the curve before reading the IC50."], None, "Export from your plate reader to Excel with two columns: concentration, response."),
+ "r_screen": ("Compound Screening", ["Paste the SMILES (copy it from PubChem).", "Run and read the rule checks."], None, "Local screen only. For ADME/toxicity in a paper use SwissADME and ProTox-3."),
+ "r_dock": ("Docking Validation, then Molecular Docking", ["Docking Validation: choose 'RCSB PDB ID', type 1IEP, download, pick the ligand, run (shows the test passing).", "Do the same with a crystal structure of YOUR protein if one has a bound ligand.", "Then Molecular Docking: same receptor preparation, same box, 3 seeds.", "Report mean ± SD and every setting."], None,
+            "Why your thesis Vina results may differ: scores depend on receptor/ligand preparation, box, exhaustiveness, Vina version and seed. We measured -13.26 vs -13.93 kcal/mol for the SAME complex with two ligand preparations. Never compare scores prepared differently."),
+ "r_target": ("Live Data Explorer (ChEMBL)", ["Look up the compound's known bioactivity and mechanism.", "For target PREDICTION use SwissTargetPrediction or PLATO, then confirm in ChEMBL."], None, "Target fishing is not built into this app."),
+ "r_omics": ("Omics & Tools", ["Press 'Try simulated demo data' and Run to see the output.", "Then use your own table: genes in rows, samples in columns.", "Read 'What I understood from your file'.", "Use FDR < 0.05."], ["expression", "groups"], None),
+ "r_surv": ("Statistics", ["Columns: time, event (1 = event, 0 = censored), group (two groups).", "Upload and run."], ["survival"], None),
+ "r_enr": ("Statistics", ["Columns: score, label (1 = known active, 0 = decoy).", "Tick 'lower is better' for Vina energies."], ["enrichment"], None),
+ "r_demo": ("Omics & Tools", ["Open the 'Omics & Tools' tab.", "Press 'Try simulated demo data', then 'Run differential expression'."], None, None),
+ "r_lit": ("Literature & Bibliography", ["Search your topic.", "Open each paper before citing it."], None, None),
+ "r_data": ("Free public data", ["cBioPortal (cbioportal.org): pick a glioblastoma study, download clinical (survival) and expression data.", "GEO (ncbi.nlm.nih.gov/geo): search 'glioblastoma', download a series matrix.", "GlioVis and CGGA: glioma expression + survival.", "From your lab: Excel with gene names in column 1 and one column per sample.", "Always cite the dataset and check its licence."], ["expression", "survival"], None),
+}
+TREE = {
+ "root": ("What do you have right now?", [("📄 Papers (PDF)", "pdf"), ("🧪 A molecule or a protein", "mol"), ("📊 Numbers in a table", "table"), ("🔬 Lab dose-response results", "ic50"), ("🤷 Nothing yet / I am lost", "none")]),
+ "mol": ("What do you want to know?", [("Is it drug-like / can it reach the brain?", "r_screen"), ("How does it bind a protein?", "r_dock"), ("What are its known targets / bioactivity?", "r_target")]),
+ "table": ("What do the numbers measure?", [("Gene expression (tumour vs normal)", "r_omics"), ("Patient survival", "r_surv"), ("Docking scores of actives vs decoys", "r_enr")]),
+ "none": ("What would you like?", [("See a working demo in 10 seconds", "r_demo"), ("Find papers on my topic", "r_lit"), ("Learn how to get free public data", "r_data")]),
+}
+KEYWORDS = {"pdf": ["pdf", "paper", "article"], "r_screen": ["smiles", "drug-like", "lipinski", "bbb"], "r_dock": ["dock", "vina", "binding", "protein"], "r_target": ["target", "bioactiv", "plato", "chembl"],
+            "r_omics": ["expression", "omics", "gene", "rna", "csv"], "r_surv": ["survival", "kaplan", "hazard"], "ic50": ["ic50", "dose", "viability"], "r_data": ["data", "dataset", "download"], "r_lit": ["pubmed", "reference", "citation"]}
+
+
+def _show_result(k):
+    tab, steps, files, note = R[k]
+    st.success(f"**Go to: {tab}**")
+    st.markdown("\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1)))
+    if files:
+        st.caption("No data yet? Download a sample file to practise:")
+        _dl(files)
+    if note:
+        st.warning(note)
+
+
+def _guide_chat():
+    ss = st.session_state
+    ss.setdefault("gc_node", "root")
+    q = st.chat_input("Or type what you want in your own words (e.g. 'I want to dock a drug')", key="gc_text")
+    if q:
+        low = q.lower()
+        hit = next((k for k, ws in KEYWORDS.items() if any(w in low for w in ws)), None)
+        ss["gc_node"] = hit or "none"
+        ss["gc_note"] = None if hit else "I did not recognise that, so here are the common starting points."
+    node = ss["gc_node"]
+    with st.chat_message("assistant"):
+        if node in R:
+            _show_result(node)
+        else:
+            if ss.get("gc_note"):
+                st.caption(ss["gc_note"])
+            qn, opts = TREE[node]
+            st.markdown(f"**{qn}**")
+            cols = st.columns(len(opts) if len(opts) <= 3 else 3)
+            for i, (lab, nxt) in enumerate(opts):
+                if cols[i % len(cols)].button(lab, key=f"gc_{node}_{nxt}"):
+                    ss["gc_node"] = nxt if nxt in TREE or nxt in R else "root"
+                    ss["gc_note"] = None
+                    st.rerun()
+    if node != "root" and st.button("↩ Start over", key="gc_reset"):
+        ss["gc_node"] = "root"
+        st.rerun()
+
+
 def start_here():
-    with st.expander("👋 New here? Start here (30 seconds)", expanded=False):
-        goal = st.selectbox("What do you want to do?", list(GOALS), key="start_goal")
-        tab, why = GOALS[goal]
-        st.success(f"**Go to the tab: {tab}.** {why}")
-        st.caption("Every tab has a '🧭 30-second guide' at the top. Results are research aids, never medical advice.")
+    with st.expander("👋 Lost? Start here: I will guide you", expanded=False):
+        _guide_chat()
+        with st.expander("How much can I trust each tool? (read before citing)"):
+            import pandas as pd
+            st.dataframe(pd.DataFrame(CRED, columns=["Tool", "Status", "What to do / cite"]), hide_index=True)
+        st.caption("Every tab has a '🧭 30-second guide'. Research and education only, never medical advice.")
