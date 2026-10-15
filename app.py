@@ -93,10 +93,14 @@ except Exception:
     labnotebook = None
 
 st.set_page_config(
-    page_title="OncoAgent-GBM",
+    page_title="OncoAgent-GBM: open glioblastoma drug-discovery toolkit",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={"Get help": "https://github.com/TiaGassem/OncoAgent-GBM/issues",
+                "Report a bug": "https://github.com/TiaGassem/OncoAgent-GBM/issues",
+                "About": "OncoAgent-GBM: open-source research toolkit for glioblastoma drug discovery (docking validation, "
+                         "omics, survival statistics, cited PDF chat). Research and education only. https://github.com/TiaGassem/OncoAgent-GBM"},
 )
 
 LANG = {
@@ -2431,8 +2435,8 @@ def tab_validation():
     src = st.radio("Structure source", ["Built-in example (imatinib / Abl, PDB 1IEP)", "Upload .pdb", "RCSB PDB ID"], horizontal=True, key="rd_src")
     pdb_text = ""
     if src.startswith("Built-in"):
-        import pathlib
-        pdb_text = (pathlib.Path(__file__).parent / "examples" / "1iep_complex.pdb").read_text()
+        from example_data import example_pdb
+        pdb_text = example_pdb()
         st.session_state["rd_pdb_id"] = "1IEP"
         st.info("Published crystal structure used to demonstrate the test. Pick the ligand and press Run: it should pass (about 0.9 Å).")
     elif src == "Upload .pdb":

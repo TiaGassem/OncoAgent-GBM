@@ -53,6 +53,9 @@ GLOSS = [
  (["what is this", "what can you do", "what does this app", "what is oncoagent"], "OncoAgent-GBM is an open research toolkit for glioblastoma: docking with validation, compound screening, omics and survival statistics, IC50 fitting, cited PDF chat, literature tools and a lab notebook. It runs on **any** protein, drug or dataset you provide. Research and education only."),
  (["which tab", "where do i start", "where to start", "first"], "Quick start: press **'Try simulated demo data'** in *Omics & Tools*, then Run. Then tell me your own goal and I'll make you a plan."),
 ]
+GLOSS.insert(0, (["example data", "sample data", "sample file", "sample files", "create csv", "make csv", "generate csv", "demo data", "example file", "no csv", "no input"],
+ "No input data? Here are credible examples you can download and use right now: a **simulated** expression table + groups (Omics), **real** textbook survival data (Statistics), **simulated** docking scores (enrichment) and a **real** crystal structure with its drug (Docking Validation). Every one is labelled in the app; each tab also has an 'example data' button. [[DL:expression,groups,survival,enrichment,pdb]]"))
+GLOSS.append((["trust", "credible", "reliable", "validated", "accurate"], "Short version: docking is real AutoDock Vina (works on any protein; I show one redocking test case), statistics are checked against SciPy and a textbook dataset, ADME/toxicity here are local approximations (use SwissADME/ProTox-3 for papers), target fishing is not built in. Full table: open *How much can I trust each tool?* under the bubble."))
 REFUSE = ["should i take", "treat my", "my patient", "prescribe", "what dose should", "cure", "am i going to"]
 YES, NO = ["yes", "yeah", "yep", "i do", "i have", "ok"], ["no", "nope", "not yet", "nothing", "i don't", "i dont"]
 
@@ -187,6 +190,9 @@ def respond(text, ctx=None):
         val = _onb_goal(t) if st_ == 1 else _onb_assets(t) if st_ == 2 else ("beginner" if _has(t, ["beginner", "new", "no experience", "never"]) else "some" if _has(t, ["some", "experience", "comfortable"]) else None)
         if val is None:
             q, sug = ONB_Q[st_]
+            for kws, ans in GLOSS:   # the user asked a question mid-setup: answer it, then carry on
+                if _has(t, kws):
+                    return (ans + "\n\n*Back to your setup:* " + q, ctx, sug)
             return ("Sorry, I did not catch that. " + q, ctx, sug)
         onb[["goal", "assets", "level"][st_ - 1]] = val
         if st_ < 3:
@@ -215,7 +221,7 @@ def respond(text, ctx=None):
         return (OPENER, {}, START)
     if _has(t, ["thank", "thanks", "merci"]):
         return ("You're welcome! Ask me anything else, or tell me your next goal.", ctx, START)
-    STRONG = ["differs", "differ from", "different from", "different results", "thesis", "can i cite", "how do i cite", "how to cite", "cite this", "not working", "doesn't work", "doesnt work", "error", "crash", "patient data", "privacy", "what is this app", "what can you do"]
+    STRONG = ["example data", "sample data", "sample file", "sample files", "create csv", "make csv", "generate csv", "demo data", "example file", "no csv", "no input", "differs", "differ from", "different from", "different results", "thesis", "can i cite", "how do i cite", "how to cite", "cite this", "not working", "doesn't work", "doesnt work", "error", "crash", "patient data", "privacy", "what is this app", "what can you do"]
     for kws, ans in GLOSS:
         if any(k in STRONG and _has(t, [k]) for k in kws):
             return (ans, ctx, ["Make me a plan", "Start over"])

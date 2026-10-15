@@ -125,7 +125,7 @@ or therapeutic use.
 
 
 ## Tests and contributing
-`pip install -r requirements-dev.txt && pytest -q` (44 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
+`pip install -r requirements-dev.txt && pytest -q` (45 tests + `scripts/redock_1iep.py` real-docking check: report export, redocking RMSD, honesty guards,
 statistics against textbook values, headless app load). Issues and pull requests are welcome; every scientific
 claim added must carry a DOI/PMID or be labelled "author convention".
 
@@ -137,3 +137,7 @@ See `CITATION.cff`. Add the Zenodo DOI after your first release (see `PUBLISHING
 If you use OncoAgent-GBM, please cite it using `CITATION.cff` (GitHub "Cite this repository") and the Zenodo DOI of the
 release you used. The licence (MIT) requires keeping the copyright notice; citation is the academic norm and is requested,
 not legally enforceable by the licence.
+
+
+## Keywords
+Glioblastoma (GBM) drug discovery, molecular docking (AutoDock Vina) with redocking validation, CDC25, differential expression, Kaplan-Meier / log-rank, IC50 four-parameter fit, compound screening (PAINS, BBB), chat with PDFs with page citations. Live app and landing page: see `docs/SEO_GUIDE.md`.

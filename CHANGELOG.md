@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.10.1 - 2026-10-15
+- **Floating 💬 bubble chat** ("Lost? Ask the guide"): chat bubbles, 3-question onboarding, roadmap, answers questions asked mid-setup. Built-in docking example is now embedded in code (`example_data.py`): fixes "FileNotFoundError examples/1iep_complex.pdb" when the folder is not uploaded.
+- **SEO**: GitHub Pages landing page (`docs/index.html`, JSON-LD, FAQ, sitemap) and `docs/SEO_GUIDE.md`.
+
+## 2.9.1 - 2026-10-15
+- **Fixed** "FileNotFoundError ... examples/1iep_complex.pdb": the example structure is now embedded in `example_data.py` (no folder upload needed).
+- **SEO/indexation**: static landing page (`docs/index.html` with title, description, JSON-LD), `robots.txt`, `sitemap.xml`, step-by-step `docs/SEO_GUIDE.md`; clearer Streamlit page title and About menu.
+
 ## 2.9.0 - 2026-10-14
 - **"I'm lost" now starts a general onboarding conversation**: 3 questions (goal, what you have, experience) then a personal roadmap across the WHOLE app and research workflow; ask "explain step N", "tour", or any question. Free-text descriptions still get a plan.
 - **No data? No problem**: Docking Validation has a built-in example (imatinib/Abl crystal structure, `examples/1iep_complex.pdb`); Statistics has "Try example data" (real Freireich survival data, simulated docking scores); Omics already had demo data. All clearly labelled.

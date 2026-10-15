@@ -91,7 +91,8 @@ def sample_files():
     surv = "time,event,group\n" + "".join(f"{t},{e},6-MP\n" for t, e in zip(mp, me)) + "".join(f"{t},1,control\n" for t in ct)
     rng = np.random.default_rng(3)
     enr = "score,label\n" + "".join(f"{v:.2f},1\n" for v in rng.normal(-9, 1, 30)) + "".join(f"{v:.2f},0\n" for v in rng.normal(-7, 1, 300))
-    return {"expression": ("SIMULATED expression table", X.to_csv(), "demo_expression.csv"), "groups": ("Group labels for it", gr, "demo_groups.csv"),
+    from example_data import example_pdb
+    return {"pdb": ("Example crystal structure (imatinib/Abl, PDB 1IEP) for Docking Validation", example_pdb(), "1iep_complex.pdb"), "expression": ("SIMULATED expression table", X.to_csv(), "demo_expression.csv"), "groups": ("Group labels for it", gr, "demo_groups.csv"),
             "survival": ("Real textbook survival data (Freireich 1963, leukaemia, not GBM)", surv, "freireich_survival.csv"),
             "enrichment": ("SIMULATED docking scores (30 actives, 300 decoys)", enr, "demo_enrichment.csv")}
 
@@ -157,22 +158,29 @@ def _guide_chat():
             if files and i == len(ss["gb_hist"]) - 1:
                 st.caption("Sample files to practise with:")
                 _dl(files)
-    cols = st.columns(len(ss["gb_sug"]) if ss["gb_sug"] else 1)
     for j, sug in enumerate(ss["gb_sug"] or []):
-        if cols[j].button(sug, key=f"gb_s{len(ss['gb_hist'])}_{j}"):
+        if st.button(sug, key=f"gb_s{len(ss['gb_hist'])}_{j}", use_container_width=True):
             send(sug); st.rerun()
-    q = st.chat_input("Type your question or goal here (e.g. 'I am lost', 'what is RMSD?')", key="gb_input")
-    if q:
-        send(q); st.rerun()
+    with st.form("gb_form", clear_on_submit=True):
+        q = st.text_input("Type your question or goal (e.g. I am lost)", key="gb_text")
+        if st.form_submit_button("Send") and q.strip():
+            send(q.strip()); st.rerun()
 
 
-APP_VERSION = "2.9.0"
+APP_VERSION = "2.10.1"
+_CSS = """<style>
+.st-key-guide_bubble{position:fixed;bottom:22px;right:22px;z-index:99999;width:auto !important}
+.st-key-guide_bubble button{border-radius:28px;box-shadow:0 4px 14px rgba(0,0,0,.28);font-weight:600}
+div[data-testid="stPopoverBody"]{width:min(440px,92vw);max-height:75vh;overflow-y:auto}
+</style>"""
 
 
 def start_here():
-    with st.expander(f"👋 Lost? Start here: chat with your guide (v{APP_VERSION})", expanded=False):
-        _guide_chat()
-        with st.expander("How much can I trust each tool? (read before citing)"):
-            import pandas as pd
-            st.dataframe(pd.DataFrame(CRED, columns=["Tool", "Status", "What to do / cite"]), hide_index=True)
+    st.markdown(_CSS, unsafe_allow_html=True)
+    with st.container(key="guide_bubble"):
+        with st.popover(f"💬 Lost? Ask the guide (v{APP_VERSION})"):
+            _guide_chat()
+    with st.expander("How much can I trust each tool? (read before citing)"):
+        import pandas as pd
+        st.dataframe(pd.DataFrame(CRED, columns=["Tool", "Status", "What to do / cite"]), hide_index=True)
         st.caption("Every tab has a '🧭 30-second guide'. Research and education only, never medical advice.")
