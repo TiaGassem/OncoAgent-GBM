@@ -2428,9 +2428,14 @@ def tab_validation():
     if not est["can_dock"] or not est["openbabel"]:
         st.error("This server cannot run real docking (AutoDock Vina and/or OpenBabel missing), so the automatic test "
                  "is disabled. See the Molecular Docking tab for the fix.")
-    src = st.radio("Structure source", ["Upload .pdb", "RCSB PDB ID"], horizontal=True, key="rd_src")
+    src = st.radio("Structure source", ["Built-in example (imatinib / Abl, PDB 1IEP)", "Upload .pdb", "RCSB PDB ID"], horizontal=True, key="rd_src")
     pdb_text = ""
-    if src == "Upload .pdb":
+    if src.startswith("Built-in"):
+        import pathlib
+        pdb_text = (pathlib.Path(__file__).parent / "examples" / "1iep_complex.pdb").read_text()
+        st.session_state["rd_pdb_id"] = "1IEP"
+        st.info("Published crystal structure used to demonstrate the test. Pick the ligand and press Run: it should pass (about 0.9 Å).")
+    elif src == "Upload .pdb":
         f = st.file_uploader("PDB file with protein + bound ligand", type=["pdb", "ent"], key="rd_file")
         if f:
             pdb_text = f.getvalue().decode("utf-8", "ignore")

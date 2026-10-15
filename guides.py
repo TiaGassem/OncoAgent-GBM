@@ -16,7 +16,7 @@ G = {
    expect="Binding energy in kcal/mol (more negative = stronger predicted binding) and ranked poses.", dont="Don't compare energies across different proteins, and never call a docking score proof of binding.",
    fails="'Engine missing' means the server lacks Vina/OpenBabel. Ligand fails? Check the SMILES and charges."),
  "validate": dict(title="Docking validation (redocking)", why="Proves your docking set-up can reproduce a real crystal structure before you trust it on new molecules.",
-   need="A PDB file that contains a protein AND its bound drug (or a 4-letter PDB ID).", steps=["Upload the PDB or type its ID.", "Pick the ligand to redock.", "Run with 2-3 seeds (1-3 minutes each)."],
+   need="A PDB file with a protein AND its bound drug, a 4-letter PDB ID, or just the built-in example (imatinib/Abl).", steps=["Pick 'Built-in example' to see the test pass, or upload your PDB / type its ID.", "Pick the ligand to redock.", "Run with 2-3 seeds (1-3 minutes each)."],
    expect="RMSD <= 2.0 Å = pass (imatinib in Abl gave 0.90 Å in our test). Orange = real pose, green = docked.", dont="Don't skip it, and don't claim one pass validates other targets.",
    fails="FAIL? Check the pocket box, ligand protonation and try higher exhaustiveness. No ligand listed? That structure has no drug-like ligand."),
  "lit": dict(title="Literature, references and citations", why="Find papers on PubMed and cite them correctly.",
@@ -29,7 +29,7 @@ G = {
    need="Concentrations and responses; at least 6 concentrations spanning the curve, ideally with replicates.", steps=["Enter concentration,response pairs.", "Run the fit.", "Check the curve shape before reading the IC50."],
    expect="An IC50 estimate and the fitted curve.", dont="Don't trust an IC50 outside your tested range or when the curve has no plateau.", fails="Fit fails? Use more points, check units and that responses are not all equal."),
  "stats": dict(title="Statistics: survival and docking enrichment", why="Test whether two patient groups survive differently, or whether your docking separates real binders from decoys.",
-   need="CSV: time, event (1/0), group  |  or score, label (1 active / 0 decoy).", steps=["Upload your CSV.", "Press Run.", "Read p-value and curves (or AUC / enrichment)."],
+   need="CSV: time, event (1/0), group  |  or score, label (1 active / 0 decoy). No file? Use the built-in example data.", steps=["Choose 'Try example data' or upload your CSV.", "Press Run.", "Read p-value and curves (or AUC / enrichment)."],
    expect="Log-rank chi-square and p, Kaplan-Meier curves; AUC 0.5 = random, 1.0 = perfect.", dont="Don't claim significance with very few events; report n.", fails="Error? Check column names and that there are exactly 2 groups."),
  "omics": dict(title="Omics and tools", why="Find genes that differ between groups, test gene sets, check compounds and ligand contacts.",
    need="Expression table (genes x samples) + group labels, or SMILES, or a PDB + ligand.", steps=["Click 'Try simulated demo data' first to see the output.", "Download the template and fill in your data.", "Read 'What I understood from your file'.", "Use FDR < 0.05, not the raw p-value."],
@@ -166,8 +166,11 @@ def _guide_chat():
         send(q); st.rerun()
 
 
+APP_VERSION = "2.9.0"
+
+
 def start_here():
-    with st.expander("👋 Lost? Start here: I will guide you", expanded=False):
+    with st.expander(f"👋 Lost? Start here: chat with your guide (v{APP_VERSION})", expanded=False):
         _guide_chat()
         with st.expander("How much can I trust each tool? (read before citing)"):
             import pandas as pd

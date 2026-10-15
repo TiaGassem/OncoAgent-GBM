@@ -83,9 +83,120 @@ def _plan(found):
     return lines, dl
 
 
+ONB_Q = {
+ 1: ("**Step 1 of 3.** What are you trying to achieve right now?", ["Understand a disease or target (read papers)", "Test a drug or molecule", "Analyse my experimental data", "Write my thesis or paper"]),
+ 2: ("**Step 2 of 3.** What do you already have?", ["Papers (PDF)", "A molecule (name or SMILES)", "Lab or patient-cohort data (table)", "Nothing yet"]),
+ 3: ("**Step 3 of 3.** How comfortable are you with this kind of analysis?", ["Beginner", "Some experience"]),
+}
+LOST_WORDS = ["lost", "confused", "stuck", "beginner", "don't know where", "dont know where", "help me", "where do i begin"]
+STEPS = {  # key -> (tab, why, guide key)
+ "pdf": ("Chat with Papers", "get exact, page-cited answers from your PDFs", "chat_pdf"),
+ "lit": ("Literature & Bibliography", "find and cite papers correctly", "lit"),
+ "screen": ("Compound Screening", "quick drug-likeness and brain-penetration rule check", "screen"),
+ "validate": ("Docking Validation", "prove the docking set-up works (use the built-in example first)", "validate"),
+ "dock": ("Molecular Docking", "dock your molecule into your protein and read the contacts", "dock"),
+ "ic50": ("4PL IC50 Fit", "turn dose-response numbers into an IC50", "ic50"),
+ "omics": ("Omics & Tools", "find genes that differ between groups", "omics"),
+ "surv": ("Statistics", "survival curves and log-rank, or docking enrichment", "stats"),
+ "notebook": ("Lab Notebook", "keep dated notes and a backup", "notebook"),
+ "data": ("Free public data", "sample files + real public datasets (cBioPortal, GEO, GlioVis, CGGA)", None),
+}
+
+
+def _onb_goal(t):
+    for k, kws in (("lit", ["understand", "disease", "target", "papers", "read", "literature"]), ("drug", ["test", "drug", "molecule", "compound"]),
+                   ("data", ["analyse", "analyze", "data", "experiment"]), ("write", ["write", "thesis", "paper", "publish"])):
+        if _has(t, kws):
+            return k
+    return None
+
+
+def _onb_assets(t):
+    if _has(t, ["nothing", "none", "no data", "nothing yet"]):
+        return "none"
+    for k, kws in (("pdf", ["papers", "pdf"]), ("mol", ["molecule", "smiles", "compound", "drug"]), ("table", ["lab", "table", "data", "cohort", "csv", "excel"])):
+        if _has(t, kws):
+            return k
+    return None
+
+
+def _roadmap(goal, assets, level):
+    steps = []
+    if assets == "none":
+        steps.append("data")
+    if goal == "lit":
+        steps += ["pdf", "lit"] if assets == "pdf" else ["lit", "pdf"]
+    elif goal == "drug":
+        steps += ["screen", "validate", "dock"] + (["ic50"] if assets == "table" else [])
+    elif goal == "data":
+        steps += ["omics", "surv", "ic50"] if assets != "pdf" else ["pdf"]
+    else:
+        steps += ["lit", "pdf", "notebook"]
+    seen, out = set(), []
+    for k in steps:
+        if k not in seen:
+            seen.add(k); out.append(k)
+    lines = []
+    for i, k in enumerate(out, 1):
+        tab, why, _ = STEPS[k]
+        pre = "start with the example data: " if (level == "beginner" and k in ("omics", "validate", "surv")) else ""
+        lines.append(f"{i}. **{tab}**: {pre}{why}.")
+    md = "Here is **your personal roadmap**:\n\n" + "\n".join(lines)
+    if goal == "drug":
+        md += "\n\n⚠ Docking scores depend on preparation, box and seed. Validate first, report every setting, and use SwissADME/ProTox-3 for ADME/toxicity in papers."
+    if goal == "write":
+        md += "\n\nFor writing: read *Limitations & Honesty*, cite AutoDock Vina, RDKit, SciPy and this app (CITATION.cff), and say what is simulated or unvalidated."
+    if assets == "none" or "omics" in out or "surv" in out:
+        md += " [[DL:expression,groups,survival]]"
+    return md, out
+
+
+def _explain(n, ctx):
+    keys = ctx.get("roadmap") or []
+    if not (1 <= n <= len(keys)):
+        return None
+    gk = STEPS[keys[n - 1]][2]
+    if not gk:
+        return "**Free public data**: download the sample files below to practise. Real data: cBioPortal (glioblastoma study → clinical + expression), GEO (series matrix), GlioVis, CGGA. Cite the dataset. [[DL:expression,groups,survival]]"
+    from guides import G
+    g = G[gk]
+    return (f"**{g['title']}**\n\n*Why:* {g['why']}\n\n*You need:* {g['need']}\n\n" + "\n".join(f"{i}. {x}" for i, x in enumerate(g["steps"], 1)) +
+            f"\n\n*Expect:* {g['expect']}\n\n*Don't:* {g['dont']}\n\n*If it fails:* {g['fails']}")
+
+
+TOUR = ("**The app in 12 lines**\n\nChat with Papers (cited quotes) · Compound Screening (drug-likeness, BBB) · Molecular Docking (any drug, any protein) · "
+        "Docking Validation (redocking test) · Literature (PubMed) · Live Data Explorer (cBioPortal, ChEMBL) · 4PL IC50 Fit · Statistics (survival, enrichment) · "
+        "Omics & Tools (differential genes, PCA) · Citations · AI Assistant (grounded notes) · Lab Notebook. Each tab has a 🧭 30-second guide.")
+
+
 def respond(text, ctx=None):
     ctx = dict(ctx or {})
     t = _norm(text)
+    m = re.search(r"(?:explain|show|open)?\s*step\s*(\d)", t)
+    if m and ctx.get("roadmap"):
+        e = _explain(int(m.group(1)), ctx)
+        if e:
+            return (e, ctx, ["Explain step 2" if m.group(1) == "1" else "Show me the tour", "Show me the tour", "Start over"])
+    if _has(t, ["tour", "all the tabs", "what are the tabs"]):
+        return (TOUR, ctx, ["Start over", "What is RMSD?"])
+    onb = ctx.get("onb")
+    if onb and len(t.split()) > 8 and any(_has(t, v[0]) for v in INTENTS.values()):
+        ctx["onb"] = onb = None   # the user described their situation in free text: switch to a plan
+    if onb and not _has(t, ["restart", "start over", "reset"]):
+        st_ = onb["step"]
+        val = _onb_goal(t) if st_ == 1 else _onb_assets(t) if st_ == 2 else ("beginner" if _has(t, ["beginner", "new", "no experience", "never"]) else "some" if _has(t, ["some", "experience", "comfortable"]) else None)
+        if val is None:
+            q, sug = ONB_Q[st_]
+            return ("Sorry, I did not catch that. " + q, ctx, sug)
+        onb[["goal", "assets", "level"][st_ - 1]] = val
+        if st_ < 3:
+            onb["step"] = st_ + 1
+            ctx["onb"] = onb
+            q, sug = ONB_Q[st_ + 1]
+            return (q, ctx, sug)
+        md, keys = _roadmap(onb["goal"], onb["assets"], onb["level"])
+        ctx["onb"] = None; ctx["roadmap"] = keys
+        return (md + "\n\nAsk me to *explain step 1*, take a *tour*, or ask any question.", ctx, ["Explain step 1", "Show me the tour", "Start over"])
     if _has(t, REFUSE):
         return ("I can't give medical advice or treatment decisions: this is a research and education tool. For patient care, please consult a clinician. "
                 "I'm happy to help with a research question instead.", ctx, START)
@@ -116,7 +227,7 @@ def respond(text, ctx=None):
     found = {k for k, (kws, _, _) in INTENTS.items() if _has(t, kws)}
     if _has(t, ["i have no data", "no data yet", "nothing yet", "i have no csv"]):
         found = {"data"}
-    if found and not _has(t, ["i am lost", "i'm lost", "im lost"]):
+    if found and not (_has(t, LOST_WORDS) and len(t.split()) <= 6):
         lines, dl = _plan(found)
         names = ", ".join(INTENTS[k][1] for k in ORDER if k in found)
         ans = "Here is your plan:\n\n" + "\n".join(f"{i}. {l}" for i, l in enumerate(lines, 1))
@@ -129,8 +240,10 @@ def respond(text, ctx=None):
                 ans += " [[DL:" + ",".join(dl) + "]]"
         ctx["found"] = sorted(found)
         return (ans, ctx, ["What is FDR?", "Can I cite this?", "Start over"])
-    if _has(t, ["lost", "help", "start", "confused", "don't know", "dont know", "stuck", "beginner"]):
-        return (OPENER, ctx, START)
+    if _has(t, LOST_WORDS + ["help", "start", "don't know", "dont know"]):
+        ctx["onb"] = {"step": 1}
+        q, sug = ONB_Q[1]
+        return ("No problem, I'll guide you from zero. Three quick questions, then I'll build your roadmap.\n\n" + q, ctx, sug)
     for kws, ans in GLOSS:
         if _has(t, kws):
             return (ans, ctx, ["Make me a plan", "Start over"])

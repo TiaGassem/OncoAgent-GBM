@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.0 - 2026-10-14
+- **"I'm lost" now starts a general onboarding conversation**: 3 questions (goal, what you have, experience) then a personal roadmap across the WHOLE app and research workflow; ask "explain step N", "tour", or any question. Free-text descriptions still get a plan.
+- **No data? No problem**: Docking Validation has a built-in example (imatinib/Abl crystal structure, `examples/1iep_complex.pdb`); Statistics has "Try example data" (real Freireich survival data, simulated docking scores); Omics already had demo data. All clearly labelled.
+- Version label in the guide box (v2.9.0) so you can check what is deployed.
+
 ## 2.8.0 - 2026-10-14
 - **Real conversational guide** (`guide_bot.py`): type anything; it answers questions about the app and concepts (RMSD, FDR, log-rank, IC50, Vina score, seeds, citing, why results differ), asks follow-up questions, remembers context, builds an ordered step-by-step plan, offers sample files, refuses medical-advice requests. Rule-based: no LLM, nothing invented. Replaces the button-only guide.
 

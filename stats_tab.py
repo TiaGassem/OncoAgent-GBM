@@ -54,6 +54,17 @@ TXT = {
 }
 
 
+def _input(key, t, kind):
+    from guides import sample_files
+    mode = st.radio("Data", ["Try example data", "Use my own CSV"], horizontal=True, key=f"{key}_mode")
+    if mode.startswith("Try"):
+        lab, txt, _ = sample_files()[kind]
+        st.warning(lab + ". For learning only.")
+        return pd.read_csv(io.StringIO(txt))
+    f = st.file_uploader(t["upload"], type=["csv"], key=f"{key}_csv")
+    return pd.read_csv(f) if f else None
+
+
 def tab_statistics(lang: str = "en"):
     t = TXT.get(lang, TXT["en"])
     st.subheader(t["title"])
@@ -62,10 +73,10 @@ def tab_statistics(lang: str = "en"):
 
     with s1:
         st.caption(t["surv_help"])
-        f = st.file_uploader(t["upload"], type=["csv"], key="surv_csv")
-        if f and st.button(t["run"], key="surv_run"):
+        df0 = _input("surv", t, "survival")
+        if df0 is not None and st.button(t["run"], key="surv_run"):
             try:
-                df = pd.read_csv(f).dropna(subset=["time", "event", "group"])
+                df = df0.dropna(subset=["time", "event", "group"])
                 lr = logrank_test(df["time"], df["event"], df["group"])
                 c1, c2, c3 = st.columns(3)
                 c1.metric(t["chi"], f"{lr.chi2:.2f}")
@@ -89,10 +100,10 @@ def tab_statistics(lang: str = "en"):
         st.caption(t["enr_help"])
         lower = st.checkbox(t["lower"], value=True, key="enr_lower")
         frac = st.slider(t["frac"], 0.01, 0.5, 0.05, 0.01, key="enr_frac")
-        f = st.file_uploader(t["upload"], type=["csv"], key="enr_csv")
-        if f and st.button(t["run"], key="enr_run"):
+        df0 = _input("enr", t, "enrichment")
+        if df0 is not None and st.button(t["run"], key="enr_run"):
             try:
-                df = pd.read_csv(f).dropna(subset=["score", "label"])
+                df = df0.dropna(subset=["score", "label"])
                 sc = -df["score"] if lower else df["score"]
                 a = sc[df["label"] == 1]; d = sc[df["label"] == 0]
                 c1, c2 = st.columns(2)
